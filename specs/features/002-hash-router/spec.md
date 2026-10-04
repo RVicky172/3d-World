@@ -67,3 +67,4 @@ feature 001 and gives the gallery (003) a way to navigate.
   AC-9 now titles the page after whichever Space is showing, including on the home route. Approved.
 - 2026-10-04 — Plan approved; tasks.md written (13 tasks). In Progress.
 - 2026-10-04 — Implemented. All 12 ACs verified: 173 unit tests, 23 E2E tests (incl. 3 on a /3d-World/ sub-path build), entry 130.8 KB gz (+0.5 KB). Router/routes 100 % line coverage.
+- 2026-10-04 — AC-5 (home route opens the default Space) **superseded by 003**: the home route now shows the gallery (D-008). The rest of 002 is unchanged; its E2E tests now expect the gallery on home.

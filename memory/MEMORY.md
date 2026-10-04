@@ -4,9 +4,9 @@
 
 ## Current State (2026-10-04)
 
-- **Phase:** 1 (Core Engine & Gallery Shell) — 001 and 002 done; 003–005 not started.
-- **Active feature:** none. **002-hash-router is Implemented** (2026-10-04): 12 ACs verified, 173 unit + 23 E2E, entry 130.8 KB gz. 001 and 002 are committed and pushed to github.com/RVicky172/3d-World (main).
-- **Next step:** `/spec-new` for **003 — gallery page**. 003 must redefine the home route (today: default Space, D-007) and can use `router.navigate(id)` for cards. Note for 005: WebGL fallback and reduced-motion fades already exist; its spec should cover only the gaps.
+- **Phase:** 1 (Core Engine & Gallery Shell) — 001, 002, 003 done; 004 (camera controls) and 005 (WebGL/reduced-motion gaps) not started.
+- **Active feature:** none. **003-gallery is Implemented** (2026-10-04): 13 ACs verified, 217 unit + 40 E2E, entry 132.8 KB gz. 001–003 are committed and pushed to github.com/RVicky172/3d-World (main).
+- **Next step:** `/spec-new` for **004 — shared camera controls** (orbit/zoom/pan; mouse, touch, keyboard; OrbitControls from three/examples per tech-stack). Note for 005: WebGL fallback and reduced-motion fades already exist; its spec should cover only the gaps.
 - **Blockers:** none
 
 ## Files

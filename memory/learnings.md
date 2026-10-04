@@ -6,6 +6,10 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 
 - Disposing a mesh does not dispose its material's textures — traverse materials and dispose each texture map explicitly. `disposeObject3D` (src/shared/dispose.ts) handles this, plus `ShaderMaterial` uniform textures and `scene.background`/`environment`.
 
+## Three.js — renderer-owned resources
+
+- three r186 lazily creates a shared **DFG LUT** texture (`getDFGLUT()`) the first time any physically based material (`MeshStandardMaterial`/`MeshPhysicalMaterial`) renders, and keeps it for the renderer's lifetime. `renderer.info.memory.textures` therefore goes +1 once and never back. GPU-leak tests must take their baseline **after a warm-up visit** to a PBR Space. A real leak still shows as growth per cycle (verified: disabling gallery dispose → 12 geometries vs 2).
+
 ## Three.js — renderer sizing
 
 - Call `renderer.setSize(w, h, false)` when a `ResizeObserver` watches the container: with the default `updateStyle=true` Three writes inline px sizes onto the canvas, which then fights the CSS `100%` sizing. Let CSS size the canvas; set only the drawing buffer.
@@ -33,11 +37,17 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 
 ## DOM / CSS
 
+- Stacking since 003: canvas → `.overlay` (z 1, view DOM) → `.fader` (z 2) → `.back-to-gallery` (z 4). The fader hides the whole view while switching. Chrome that must stay steady goes above it, and `data-view` is set at the _start_ of an open so chrome never flashes.
+- jsdom lacks `HTMLImageElement.loading`: `img.loading = "lazy"` sets nothing there. Use `img.setAttribute("loading", "lazy")` (works in browsers too).
+- Colours that tests check for contrast must be solid tokens (`--surface`, `--border`): `color-mix()` computes to `color(srgb …)` strings, not `rgb()`.
+- An SVG child's `fill="none"` attribute beats a `fill` inherited from CSS on the parent `<svg>`, so one icon stylesheet can mix filled and outline shapes.
 - `Fader`: a second `out()` while an `out()` is still running must wait for that same fade, not resolve early; requesting the state it is already in resolves immediately. It starts `covered` at boot so the first Space only fades in.
 - Don't wait on `transitionend` for fades: it never fires if the property value doesn't change, if the element is `display: none`, or in jsdom. `Fader` resolves on a `setTimeout` of the same duration instead.
 
 ## Tooling
 
+- Piping a Node script via `node - <<EOF` runs it through Node 24's TypeScript stripping, and regex escapes like `/` inside template literals got mangled, so string matches silently missed. For edits containing regexes or backticks, use the Edit tool.
+- A temporary "bridge" to keep tests green between tasks only works if the code under it keeps its old semantics. Check which E2E tests depend on the changed behaviour before promising a task boundary.
 - Don't pipe `npm run check` through `grep` and then chain more steps with `&&`: the pipeline's exit status is grep's, so a failing typecheck slips through (it ticked tasks once). Check `$?` of `npm run check` itself before ticking.
 - Shell-escaped JS one-liners (`node -e "..."`) eat backticks inside the script. Use the Edit tool or a heredoc file for code comments containing backticks.
 - To strip dev/test-only code from production, guard the **call site** with a literal `if (import.meta.env.MODE !== "production")`. Vite inlines MODE, the branch becomes dead code, and the imported module is tree-shaken. Passing MODE as a runtime argument alone would keep the module in the bundle. Verified: `__WORLD__` absent from `npm run build`, present in `npm run build:test`.

@@ -11,6 +11,36 @@ Newest first. One entry per working session.
 
 ---
 
+## 2026-10-04 — 003-gallery ✔️ Implemented
+
+**Done:** Definition of Done verified: `npm run check` (217 unit), `npm run build` + bundle check (132.8 KB gz, +2.0 KB vs 002; NFR ≤ 5 KB), `npm run test:e2e` (40 incl. 3 `subpath`), Prettier clean, no console errors. Coverage total 97.2 % lines; gallery/router/back-link 95–100 %, space-manager 98.6 %. Ticked AC-1…AC-13, spec → Implemented, roadmap 003 → ✔️. NFRs not measured: 60 FPS backdrop and 1 s interactivity (no GPU in CI), argued by design.
+**Next:** commit 003; `/spec-new` for 004 camera controls.
+**Blockers:** none
+
+## 2026-10-04 — 003-gallery (T040)
+
+**Done:** `specs/architecture.md`: View concept (gallery vs Space), Gallery concept, `src/gallery/` + back link in layout, "Opening a View" with `openView`/`data-view`/`activeView`, new stacking order, routing home = gallery with route keys, new Gallery section, warm-up note in Disposal Rules, gallery seam row.
+**Next:** `/spec-verify 003`.
+**Blockers:** none
+
+## 2026-10-04 — 003-gallery (T031)
+
+**Done:** `tests/e2e/gallery.spec.ts` — 17 tests for AC-1–AC-11 and AC-13: cards/content/placeholder, click and Enter open with one history entry, no Space chunk until opened, 10-trip GPU baseline, back link per screen and keyboard, titles, roles/focus outline, 360 px single column / 1280 px multi-track grid, WCAG contrast ≥ 4.5 computed in-page, z-order fader > overlay, gallery swapped only under full cover (MutationObserver), starfield drawn/drifting/still under reduced motion. Found three's DFG LUT texture (+1 once, renderer-owned): baseline now taken after a warm-up visit; AC-6 clarified in spec changelog; mutation-checked (gallery dispose off → 12 vs 2 geometries). 217 unit + 40 E2E green.
+**Next:** T040 docs, then verify.
+**Blockers:** none
+
+## 2026-10-04 — 003-gallery (T020–T023, T030)
+
+**Done:** SpaceManager: shared `mount()` behind `open(id)` and new `openView(name, factory)`; `ViewName`, `activeView`; `data-view` set at request start; not-found counts as a Space screen. Router: `openGallery` replaces `defaultSpaceId`, route keys `gallery`/`space/<id>`, gallery title `3D World`. main.ts wires the gallery view + back link. CSS stacking canvas → overlay → fader → back link. Updated 8 E2E tests that assumed home = demo-cube; 002 spec changelog notes AC-5 superseded. T023 was merged into T030 (the bridge could not keep E2E green). Visual check via screenshots (desktop, 360 px, in-Space). 217 unit + 23 E2E green.
+**Next:** T031 gallery E2E, T040 docs, verify.
+**Blockers:** none
+
+## 2026-10-04 — 003-gallery (T010–T015)
+
+**Done:** `src/gallery/starfield.ts` (1500 seeded points, 1 draw call, no texture, drift = elapsed × speed, still with reduced motion; `sizeAttenuation: false` so far stars stay visible). `src/gallery/cards.ts` (heading + list of card links via `formatRoute`, kind labels, initials, base-aware `thumbnailUrl`, lazy decorative img with placeholder fallback on error, inline-SVG kind icons). `src/gallery/index.ts` (`createGalleryView` factory: cards in overlay, starfield in scene, full dispose). `src/ui/back-link.ts` + CSS (hidden on `data-view=gallery`). Gallery CSS with solid `--surface`/`--border` tokens. 33 new tests; 206 unit + 23 E2E green.
+**Next:** T020–T023 core changes.
+**Blockers:** none
+
 ## 2026-10-04 — 002-hash-router ✔️ Implemented
 
 **Done:** Definition of Done verified: `npm run check` (173 unit), `npm run build` + bundle check (130.8 KB gz, +0.5 KB vs 001), `npm run test:e2e` (23 incl. 3 `subpath`), Prettier clean, no console errors. Coverage: routes.ts/router.ts/debug.ts 100 % lines, total 97 %. Ticked AC-1…AC-12, spec → Implemented, roadmap 002 → ✔️.

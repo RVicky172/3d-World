@@ -11,6 +11,12 @@ async function expectShowing(page: Page, id: string) {
   await expect(body(page)).toHaveAttribute('data-space-id', id);
   await expect(body(page)).toHaveAttribute('data-space-ready', 'true');
 }
+/** Home route since 003 (002 AC-5 superseded, D-008). */
+async function expectGallery(page: Page) {
+  await expect(body(page)).toHaveAttribute('data-view', 'gallery');
+  await expect(body(page)).toHaveAttribute('data-space-ready', 'true');
+  await expect(body(page)).not.toHaveAttribute('data-space-id');
+}
 async function expectNotFound(page: Page) {
   await expect(body(page)).toHaveAttribute('data-space-status', 'not-found');
   await expect(page.getByRole('alert')).toContainText('Space not found');
@@ -76,26 +82,26 @@ test('AC-4: an unregistered id shows "Space not found"', async ({ page }) => {
   await expectNotFound(page);
 });
 
-test('AC-5: the home route shows the default Space and keeps its address', async ({ page }) => {
+test('home route (AC-5, superseded by 003): shows the gallery and keeps its address', async ({ page }) => {
   await page.goto('/');
-  await expectShowing(page, 'demo-cube');
+  await expectGallery(page);
   expect(new URL(page.url()).hash).toBe('');
 
   await page.goto('/#/');
-  await expectShowing(page, 'demo-cube');
+  await expectGallery(page);
   expect(new URL(page.url()).hash).toBe('#/');
 });
 
-test('AC-5: moving between home and the default Space’s own route does not re-open it', async ({ page }) => {
+test('equivalent home addresses do not re-open the gallery', async ({ page }) => {
   await page.goto('/#/');
-  await expectShowing(page, 'demo-cube');
+  await expectGallery(page);
   const reopened = await watchForReopen(page);
 
-  await setHash(page, '#/space/demo-cube');
+  await setHash(page, '#');
   await setHash(page, '#/');
 
   expect(await reopened()).toBe(false);
-  await expectShowing(page, 'demo-cube');
+  await expectGallery(page);
 });
 
 test('AC-6: an unknown route redirects home and Back skips it', async ({ page }) => {
@@ -103,7 +109,7 @@ test('AC-6: an unknown route redirects home and Back skips it', async ({ page })
 
   await setHash(page, '#/foo');
   await expect(page).toHaveURL(/#\/$/);
-  await expectShowing(page, 'demo-cube');
+  await expectGallery(page);
 
   await page.goBack();
   await expect(page).toHaveURL(/#\/space\/demo-cube$/);
@@ -112,7 +118,7 @@ test('AC-6: an unknown route redirects home and Back skips it', async ({ page })
 test('AC-6: a page loaded on an unknown route lands on home', async ({ page }) => {
   await page.goto('/#/space/a/b');
   await expect(page).toHaveURL(/#\/$/);
-  await expectShowing(page, 'demo-cube');
+  await expectGallery(page);
 });
 
 test('AC-8: navigating from code adds one history entry; re-navigating is a no-op', async ({ page }) => {
@@ -133,6 +139,10 @@ test('AC-8: navigating from code adds one history entry; re-navigating is a no-o
 
 test('AC-9: the page title names the Space that is showing', async ({ page }) => {
   await page.goto('/');
+  await expectGallery(page);
+  await expect(page).toHaveTitle('3D World'); // gallery (003 AC-8)
+
+  await setHash(page, '#/space/demo-cube');
   await expect(page).toHaveTitle('Demo Cube — 3D World');
 
   await setHash(page, '#/space/nope');
@@ -164,7 +174,7 @@ test('AC-10: rapid hash changes end on the last one', async ({ page }) => {
 
 test('AC-12: the old ?space= parameter is ignored', async ({ page }) => {
   await page.goto('/?space=nope');
-  await expectShowing(page, 'demo-cube');
+  await expectGallery(page);
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 

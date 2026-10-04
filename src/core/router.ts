@@ -14,8 +14,8 @@ export interface RouterDeps {
   /** Fires `hashchange` (i.e. `window`). */
   events: EventTarget;
   openSpace(id: string): Promise<OpenResult>;
-  /** Shown on the home route (spec 002, AC-5). */
-  defaultSpaceId: string;
+  /** Shows the gallery, which lives on the home route (spec 003; supersedes 002 AC-5). */
+  openGallery(): Promise<OpenResult>;
   titleOf(id: string): string | undefined;
   setTitle(title: string): void;
 }
@@ -25,8 +25,11 @@ export interface RouterDeps {
  * Back/forward, typed URLs, links and `navigate()` all arrive as `hashchange`, so none reload the page.
  */
 export class HashRouter {
-  /** The Space last requested from the manager; null after a failed open so it can be retried. */
-  private currentId: string | null = null;
+  /**
+   * What was last requested: "gallery" or "space/<id>" (these cannot collide). Null after a failed open,
+   * so the same address can be retried.
+   */
+  private currentKey: string | null = null;
   private sequence = 0;
 
   constructor(private readonly deps: RouterDeps) {}
@@ -39,7 +42,7 @@ export class HashRouter {
 
   /** Shows a Space from code (e.g. a gallery card). No-op if it is already showing (AC-8). */
   navigate(spaceId: string): void {
-    if (spaceId === this.currentId) return;
+    if (spaceKey(spaceId) === this.currentKey) return;
     const hash = formatRoute({ name: 'space', id: spaceId });
     if (this.deps.location.hash === hash) {
       // Same URL after a failed open: assigning it would fire no event, so retry directly.
@@ -63,19 +66,25 @@ export class HashRouter {
       // Replace, so Back never returns to the bad address (AC-6). replaceState fires no event.
       this.deps.history.replaceState(null, '', formatRoute(HOME_ROUTE));
     }
-    const id = route.name === 'space' ? route.id : this.deps.defaultSpaceId;
-    if (id === this.currentId) return; // already showing or opening (AC-5, AC-8)
+    const spaceId = route.name === 'space' ? route.id : null;
+    const key = spaceId === null ? GALLERY_KEY : spaceKey(spaceId);
+    if (key === this.currentKey) return; // already showing or opening (AC-5, AC-8)
 
     const token = ++this.sequence;
-    this.currentId = id;
-    const result = await this.deps.openSpace(id);
+    this.currentKey = key;
+    const result = spaceId === null ? await this.deps.openGallery() : await this.deps.openSpace(spaceId);
     if (token !== this.sequence || result === 'superseded') return; // a newer request owns the outcome
 
-    if (result === 'opened') {
-      this.deps.setTitle(`${this.deps.titleOf(id) ?? id} — ${SITE_TITLE}`);
-    } else {
-      this.currentId = null;
+    if (result !== 'opened') {
+      this.currentKey = null;
       this.deps.setTitle(SITE_TITLE);
+    } else if (spaceId === null) {
+      this.deps.setTitle(SITE_TITLE); // gallery (003 AC-8)
+    } else {
+      this.deps.setTitle(`${this.deps.titleOf(spaceId) ?? spaceId} — ${SITE_TITLE}`);
     }
   }
 }
+
+const GALLERY_KEY = 'gallery';
+const spaceKey = (id: string) => `space/${id}`;

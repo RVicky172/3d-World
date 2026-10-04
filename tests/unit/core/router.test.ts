@@ -3,8 +3,7 @@ import { HashRouter, SITE_TITLE } from '../../../src/core/router';
 import type { OpenResult } from '../../../src/core/types';
 import { FakeBrowserLocation } from '../../helpers/fakes';
 
-const TITLES: Record<string, string> = { a: 'Space A', b: 'Space B', home: 'Home Space' };
-const DEFAULT_ID = 'home';
+const TITLES: Record<string, string> = { a: 'Space A', b: 'Space B' };
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -15,6 +14,7 @@ function deferred<T>() {
 describe('HashRouter', () => {
   let browser: FakeBrowserLocation;
   let openSpace: ReturnType<typeof vi.fn<(id: string) => Promise<OpenResult>>>;
+  let openGallery: ReturnType<typeof vi.fn<() => Promise<OpenResult>>>;
   let setTitle: ReturnType<typeof vi.fn<(title: string) => void>>;
   let router: HashRouter;
 
@@ -29,7 +29,7 @@ describe('HashRouter', () => {
       history: browser,
       events: browser,
       openSpace,
-      defaultSpaceId: DEFAULT_ID,
+      openGallery,
       titleOf: (id) => TITLES[id],
       setTitle,
     });
@@ -38,6 +38,7 @@ describe('HashRouter', () => {
 
   beforeEach(() => {
     openSpace = vi.fn(async (id: string) => (id in TITLES ? 'opened' : 'not-found'));
+    openGallery = vi.fn(async () => 'opened' as const);
     setTitle = vi.fn();
   });
 
@@ -47,17 +48,19 @@ describe('HashRouter', () => {
       expect(openSpace).toHaveBeenCalledExactlyOnceWith('a');
     });
 
-    it.each(['', '#', '#/'])('opens the default Space on the home route %j (AC-5)', async (hash) => {
+    it.each(['', '#', '#/'])('opens the gallery on the home route %j (003 AC-1)', async (hash) => {
       await createRouter(hash).start();
-      expect(openSpace).toHaveBeenCalledExactlyOnceWith(DEFAULT_ID);
+      expect(openGallery).toHaveBeenCalledOnce();
+      expect(openSpace).not.toHaveBeenCalled();
       expect(browser.replaceState).not.toHaveBeenCalled();
     });
 
-    it('redirects an unknown route home, replacing the entry, then opens the default once (AC-6)', async () => {
+    it('redirects an unknown route home, replacing the entry, then opens the gallery once (AC-6)', async () => {
       await createRouter('#/foo').start();
       expect(browser.replaceState).toHaveBeenCalledExactlyOnceWith(null, '', '#/');
       expect(browser.entries).toEqual(['#/']);
-      expect(openSpace).toHaveBeenCalledExactlyOnceWith(DEFAULT_ID);
+      expect(openGallery).toHaveBeenCalledOnce();
+      expect(openSpace).not.toHaveBeenCalled();
     });
   });
 
@@ -69,12 +72,27 @@ describe('HashRouter', () => {
       expect(openSpace).toHaveBeenLastCalledWith('b');
     });
 
-    it('does not re-open when moving between home and the default Space’s own route (AC-5)', async () => {
+    it('switches between the gallery and a Space in both directions, including Back/Forward (003 AC-4)', async () => {
       await createRouter('#/').start();
-      browser.hash = `#/space/${DEFAULT_ID}`;
-      browser.hash = '#/';
+      browser.hash = '#/space/a';
       await settle();
-      expect(openSpace).toHaveBeenCalledOnce();
+      expect(openSpace).toHaveBeenLastCalledWith('a');
+
+      browser.back();
+      await settle();
+      expect(openGallery).toHaveBeenCalledTimes(2);
+
+      browser.forward();
+      await settle();
+      expect(openSpace).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not re-open the gallery for an equivalent home address', async () => {
+      await createRouter('#/').start();
+      browser.replaceState(null, '', '#');
+      browser.dispatchEvent(new Event('hashchange'));
+      await settle();
+      expect(openGallery).toHaveBeenCalledOnce();
     });
 
     it('back and forward re-open the previous and next Spaces (AC-3)', async () => {
@@ -124,12 +142,12 @@ describe('HashRouter', () => {
       expect(openSpace).toHaveBeenCalledOnce();
     });
 
-    it('does nothing for the default Space while it is showing on the home route', async () => {
+    it('from the gallery, adds one entry and opens the Space (what a card does)', async () => {
       await createRouter('#/').start();
-      router.navigate(DEFAULT_ID);
+      router.navigate('a');
       await settle();
-      expect(browser.entries).toEqual(['#/']);
-      expect(openSpace).toHaveBeenCalledOnce();
+      expect(browser.entries).toEqual(['#/', '#/space/a']);
+      expect(openSpace).toHaveBeenCalledExactlyOnceWith('a');
     });
 
     it('encodes ids into the address', async () => {
@@ -153,6 +171,15 @@ describe('HashRouter', () => {
         expect(browser.entries).toHaveLength(1);
       },
     );
+
+    it('after the gallery fails to load, returning home retries it', async () => {
+      openGallery.mockResolvedValueOnce('load-error');
+      await createRouter('#/').start();
+      browser.hash = '#/space/a';
+      browser.hash = '#/';
+      await settle();
+      expect(openGallery).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('document title (AC-9)', () => {
@@ -161,9 +188,16 @@ describe('HashRouter', () => {
       expect(setTitle).toHaveBeenLastCalledWith(`Space A — ${SITE_TITLE}`);
     });
 
-    it('names the default Space on the home route', async () => {
+    it('is the site title on the gallery (003 AC-8)', async () => {
       await createRouter('#/').start();
-      expect(setTitle).toHaveBeenLastCalledWith(`Home Space — ${SITE_TITLE}`);
+      expect(setTitle).toHaveBeenLastCalledWith(SITE_TITLE);
+    });
+
+    it('goes back to the site title when returning from a Space to the gallery', async () => {
+      await createRouter('#/space/a').start();
+      browser.hash = '#/';
+      await settle();
+      expect(setTitle).toHaveBeenLastCalledWith(SITE_TITLE);
     });
 
     it.each<OpenResult>(['not-found', 'load-error'])('is the site title after %s', async (failure) => {

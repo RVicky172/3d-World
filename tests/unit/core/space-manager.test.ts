@@ -276,4 +276,118 @@ describe('SpaceManager', () => {
       expect(status.dataset.spaceStatus).toBe('opened');
     });
   });
+
+  describe('views (spec 003)', () => {
+    /** The gallery is not in the registry: it is handed to openView() as a factory. */
+    const galleryFactory = async () => {
+      const gallery = createSpace('gallery');
+      const factory = (await gallery.meta.load()).default;
+      log = [];
+      return { gallery, factory };
+    };
+
+    it('openView() mounts a view with the same ordering as a Space (AC-11)', async () => {
+      await manager.open('a');
+      const { factory } = await galleryFactory();
+
+      await expect(manager.openView('gallery', factory)).resolves.toBe('opened');
+
+      expect(log).toEqual([
+        'fader.out',
+        'dispose(a)',
+        'setInstance(null)',
+        'create(gallery)',
+        'setInstance(gallery)',
+        'nextFrame',
+        'fader.in',
+      ]);
+    });
+
+    it('reports the active view, with no Space id on the gallery', async () => {
+      const { factory } = await galleryFactory();
+      expect(manager.activeView).toBeNull();
+
+      await manager.openView('gallery', factory);
+      expect(manager.activeView).toBe('gallery');
+      expect(manager.activeId).toBeNull();
+
+      await manager.open('a');
+      expect(manager.activeView).toBe('space');
+      expect(manager.activeId).toBe('a');
+    });
+
+    it('sets data-view as soon as a view is requested, and data-space-id only for Spaces', async () => {
+      const { factory } = await galleryFactory();
+
+      const toGallery = manager.openView('gallery', factory);
+      expect(status.dataset.view).toBe('gallery'); // immediately: the back link must not flash
+      await toGallery;
+      expect(status.dataset.spaceId).toBeUndefined();
+      expect(status.dataset.spaceReady).toBe('true');
+
+      const toSpace = manager.open('a');
+      expect(status.dataset.view).toBe('space');
+      await toSpace;
+      expect(status.dataset.spaceId).toBe('a');
+    });
+
+    it('treats "Space not found" as a Space screen (data-view="space", AC-7)', async () => {
+      const { factory } = await galleryFactory();
+      await manager.openView('gallery', factory);
+
+      await manager.open('nope');
+
+      expect(status.dataset.view).toBe('space');
+      expect(manager.activeView).toBeNull();
+    });
+
+    it('disposes the gallery when a Space opens, and the Space when the gallery returns (AC-6)', async () => {
+      const { gallery, factory } = await galleryFactory();
+      await manager.openView('gallery', factory);
+      await manager.open('a');
+      expect(gallery.instances[0]?.dispose).toHaveBeenCalledOnce();
+
+      await manager.openView('gallery', factory);
+      expect(a.instances[0]?.dispose).toHaveBeenCalledOnce();
+    });
+
+    it('rapid gallery → Space → gallery ends on the gallery; the stale Space is disposed or never created', async () => {
+      const { factory } = await galleryFactory();
+      const loadA = deferred<{ default: SpaceFactory }>();
+      const realA = await a.meta.load();
+      a.load.mockReturnValueOnce(loadA.promise);
+
+      const first = manager.openView('gallery', factory);
+      const toSpace = manager.open('a');
+      await flush();
+      const back = manager.openView('gallery', factory);
+      loadA.resolve(realA);
+
+      await expect(first).resolves.toBe('superseded');
+      await expect(toSpace).resolves.toBe('superseded');
+      await expect(back).resolves.toBe('opened');
+      expect(manager.activeView).toBe('gallery');
+      expect(a.instances.every((i) => vi.mocked(i.dispose).mock.calls.length === 1)).toBe(true);
+      expect(status.dataset.view).toBe('gallery');
+    });
+
+    it('a view whose factory throws reports load-error without throwing', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const broken: SpaceFactory = async () => {
+        throw new Error('no WebGL points');
+      };
+
+      await expect(manager.openView('gallery', broken)).resolves.toBe('load-error');
+      expect(consoleError).toHaveBeenCalledOnce();
+      consoleError.mockRestore();
+    });
+
+    it('close() clears data-view', async () => {
+      const { factory } = await galleryFactory();
+      await manager.openView('gallery', factory);
+      await manager.close();
+      expect(status.dataset.view).toBeUndefined();
+      expect(manager.activeView).toBeNull();
+    });
+  });
 });

@@ -1,6 +1,6 @@
 # 3D World — Architecture
 
-**Last updated:** 2026-10-04 · Status: core framework (001) and hash router (002) implemented; gallery and controls pending (003–004)
+**Last updated:** 2026-10-04 · Status: core framework (001), hash router (002) and gallery (003) implemented; camera controls pending (004)
 
 ---
 
@@ -11,17 +11,23 @@
   - _Multi-object Space_: many objects sharing a world and a clock (e.g. planets orbiting a sun).
 - **Engine**: owns the single `WebGLRenderer`, the canvas, the overlay layer, the render loop and resizing. It lives for
   the whole session and renders whichever Space instance it is given. It never creates or disposes Spaces.
-- **SpaceManager**: loads a Space module on demand, creates it, hands it to the Engine, and disposes the previous one.
-  It coordinates the fade transition and reports outcomes.
+- **View**: whatever is on screen. A view is either a registry **Space** or the **gallery**. Both are built from the
+  same `SpaceFactory` contract, so they share every lifecycle guarantee below. The gallery is not a Space and is
+  not in the registry.
+- **SpaceManager**: mounts views. `open(id)` loads a registry Space on demand; `openView(name, factory)` mounts
+  any other view (the gallery). It disposes the previous view, coordinates the fade, and reports outcomes.
 - **Registry**: a static list of Space metadata with lazy `import()` loaders. Nothing is loaded until it is opened.
-- **HashRouter**: maps the URL hash to the Space that should be showing and asks the SpaceManager to open it.
+- **Gallery**: the home page (`#/`). It shows a starfield backdrop and one card link per registry entry, built from
+  metadata only, so browsing it loads no Space code.
+- **HashRouter**: maps the URL hash to the view that should be showing (gallery or a Space) and asks the
+  SpaceManager to open it.
   Deep links, Back/Forward and code navigation all go through it.
 
 ## Directory Layout
 
 ```text
 src/
-  main.ts                 # bootstrap: WebGL check → renderer → Engine → Fader → SpaceManager → HashRouter.start()
+  main.ts                 # bootstrap: WebGL check → renderer → Engine → Fader → SpaceManager → gallery view + back link → HashRouter.start()
   core/
     types.ts              # the Space contract + RendererLike + OpenResult
     clock.ts              # Clock, createClock(), FakeClock: timestamps → { delta, elapsed }
@@ -34,7 +40,12 @@ src/
     capabilities.ts       # hasWebGL2(), prefersReducedMotion()
   shared/
     dispose.ts            # disposeObject3D(): geometries, materials, textures (incl. uniforms, background)
+  gallery/
+    index.ts              # createGalleryView(): the gallery as a SpaceFactory (cards in overlay, starfield in scene)
+    cards.ts              # renderGallery(): heading + list of card links; thumbnails with generated placeholder
+    starfield.ts          # STARFIELD config, seeded Points backdrop (1 draw call, still with reduced motion)
   ui/
+    back-link.ts          # permanent "Back to gallery" link, hidden on the gallery via data-view
     fader.ts              # Fader: opacity overlay hiding Space swaps (instant with reduced motion)
     messages.ts           # "Space not found" / "Failed to load" alerts in the overlay
     fallback.ts           # WebGL2-unavailable screen
@@ -42,7 +53,7 @@ src/
     registry.ts           # spaces[] with lazy loaders, findSpace()
     <space-id>/
       index.ts            # default-exports a SpaceFactory; scene data as a typed config object
-  styles/main.css         # tokens; stacking: canvas → .fader → .overlay
+  styles/main.css         # tokens; stacking: canvas → .overlay → .fader → .back-to-gallery
 scripts/
   bundle-checks.mjs       # pure bundle rules (unit-tested)
   check-bundle.mjs        # runs them on dist/ after `npm run build`
@@ -129,11 +140,13 @@ A Space that wants post-processing (for example bloom for the Sun):
 The Engine knows nothing about composers. Because `EffectComposer` comes from `three/examples`, it lands in that
 Space's lazy chunk, not the main bundle.
 
-## Opening a Space (SpaceManager)
+## Opening a View (SpaceManager)
+
+`open(id)` (registry Space) and `openView(name, factory)` (e.g. the gallery) share one sequence:
 
 ```text
-open(B)
-  clear <body data-space-*>
+open(B) / openView('gallery', f)
+  clear <body data-space-*>; set <body data-view="space" | "gallery"> immediately
   → fader.out()                       A still renders underneath
   → findSpace(B)                      unknown → close A, show "Space not found"  → 'not-found'
   → await load()                      rejects → close A, show "Failed to load"  → 'load-error'
@@ -141,9 +154,15 @@ open(B)
   → B = await factory(ctx)            throws  → show "Failed to load"           → 'load-error'
   → engine.setInstance(B) → await engine.nextFrame() → fader.in()
   → <body data-space-id="B" data-space-status="opened" data-space-ready="true">  → 'opened'
+                                      (data-space-id only for registry Spaces)
 ```
 
-- **Supersession:** every `open()` and `close()` takes a new sequence number. After each `await`, an older request
+- **`data-view`** is set when the request starts, not when it finishes, so chrome keyed off it, such as the back
+  link, never flashes. "Space not found" and "Failed to load" count as `space` screens.
+- **`activeView`** returns `gallery`, `space` or null. **`activeId`** returns the registry id, or null on the
+  gallery.
+
+- **Supersession:** every `open()`, `openView()` and `close()` takes a new sequence number, shared across views. After each `await`, an older request
   checks whether a newer one has started. If it has, it stops and returns `'superseded'`, and disposes any instance
   it had just created. Rapid switching therefore always ends on the most recent request.
 - **Never throws:** `open()` reports every failure through its result. Load and factory errors are also sent to
@@ -152,8 +171,10 @@ open(B)
 
 ### Transition (Fader)
 
-- The Fader is a full-screen element in the background colour. It sits between the canvas and the overlay, and fades
-  its opacity over 300 ms.
+- The Fader is a full-screen element in the background colour. It fades its opacity over 300 ms.
+- **Stacking inside `#app`:** canvas → `.overlay` (z 1, the view's DOM: gallery cards, Space UI, messages) →
+  `.fader` (z 2) → `.back-to-gallery` (z 4). The fader hides the whole view, both its 3D and its DOM, while
+  switching, so nothing half-removed is ever visible. Steady chrome sits above it.
 - It starts covered at boot, so the first Space only fades in.
 - With `prefers-reduced-motion`, swaps are instant.
 - Its promises resolve on a timer rather than on `transitionend`, which doesn't always fire.
@@ -166,7 +187,7 @@ Addresses live in the URL hash, so the site works on any static host, including 
 ### Route grammar (`src/core/routes.ts`)
 
 ```text
-""  "#"  "#/"                       → home        → shows the default Space (demo-cube until the gallery, 003)
+""  "#"  "#/"                       → home        → shows the gallery (003; replaced 002's default Space, D-008)
 "#/space/<id>"  "#/space/<id>/"     → space(id)   → id is percent-decoded; malformed encoding keeps the raw id
 anything else                       → unknown     → replaced with "#/" (no history entry left behind)
 ```
@@ -180,14 +201,14 @@ case-sensitive.
   reload the page. `start()` handles the address the page loaded with.
 - **Unknown routes:** `history.replaceState(…, '#/')`, then the router handles home directly, because
   `replaceState` fires no event.
-- **Skip if already showing:** the router remembers the Space it last requested. If a new route resolves to that same
-  Space (for example `#/` ↔ `#/space/demo-cube`), it does nothing. A failed open (`not-found` or `load-error`)
+- **Skip if already showing:** the router remembers the last requested view as a key, `gallery` or `space/<id>`
+  (the two cannot collide). If a new route resolves to the same key (for example `#` ↔ `#/`), it does nothing. A failed open (`not-found` or `load-error`)
   clears this memory, so the same Space can be retried.
 - **`navigate(id)`** assigns `location.hash`, which adds exactly one history entry. It does nothing if that Space is
   already showing. If the address is already correct after a failed open, it retries directly, because assigning the
   same hash fires no event.
-- **Page title:** `"<Space title> — 3D World"` once a Space has opened, and `"3D World"` after not-found or
-  load-error.
+- **Page title:** `"<Space title> — 3D World"` once a Space has opened, and `"3D World"` on the gallery and after
+  not-found or load-error.
 - **Stale results:** every request carries a sequence number. A result from an older request is ignored, even if
   it is not `superseded`. Combined with the SpaceManager's own supersession, rapid navigation always ends on the
   latest address.
@@ -195,8 +216,31 @@ case-sensitive.
 ### Startup
 
 `main.ts` creates the `HashRouter` after the SpaceManager. It passes in `window.location`, `window.history`,
-`window` (for events), `manager.open`, titles from `findSpace()` and a setter for `document.title`, then calls
-`router.start()`. The temporary `?space=` parameter from 001 is gone, and query strings are ignored.
+`window` (for events), `manager.open`, `openGallery` (which runs `manager.openView('gallery', createGalleryView(…))`),
+titles from `findSpace()` and a setter for `document.title`, then calls `router.start()`. The temporary `?space=` parameter from 001 is gone, and query strings are ignored.
+
+## Gallery (`src/gallery/`)
+
+- **A view, not a Space:** `createGalleryView({ spaces, baseUrl })` returns a `SpaceFactory`. Mounted with
+  `openView('gallery', …)`, it gets fades, disposal, supersession and the leak test for free. It imports registry
+  **metadata** only, never Space modules, so the gallery downloads no Space code. The bundle check still verifies
+  that Spaces are lazy chunks.
+- **Cards:**
+  - `<h1>`, then `<ul>`, then one `<li><a class="card" href="#/space/<id>">` per registry entry, in order.
+  - Real links, so click, tap, Enter and Back work with no script.
+  - Text is inserted as text, never as HTML.
+- **Preview:**
+  - `thumbnail` (a path under `public/`, joined with Vite's `BASE_URL`) is shown as `<img loading="lazy" alt="">`.
+  - If there is no thumbnail, or it fails to load, a generated placeholder (kind icon + initials) takes its place.
+  - The preview box has a fixed aspect ratio either way.
+- **Starfield:**
+  - 1500 seeded `Points` in a shell around the camera, with `sizeAttenuation: false`.
+  - One draw call, no textures.
+  - Rotation is a pure function of elapsed time, and it is still under reduced motion.
+- **Accessibility:**
+  - Cards sit on a solid `--surface`, so contrast never depends on the backdrop.
+  - `:focus-visible` outlines.
+- **Back to gallery:** a permanent link above the fader, hidden by CSS when `body[data-view="gallery"]`.
 
 ## Disposal Rules
 
@@ -207,8 +251,9 @@ composers.
   every `Texture` a material references, `ShaderMaterial` uniform textures, and `scene.background` and
   `scene.environment`. Shared resources are disposed once.
 - Use `ctx.signal` for event listeners so they are removed automatically: it is aborted before `dispose()` runs.
-- The E2E test for AC-4 opens and closes a Space 10 times and asserts that `renderer.info.memory` returns to its
-  baseline.
+- The E2E tests (001 AC-4, 003 AC-6) cycle a Space 10 times and assert that `renderer.info.memory` returns to its
+  baseline. Take the baseline **after a warm-up visit** to a PBR Space: three.js creates a shared DFG lookup texture
+  on the first physically based material and keeps it for the renderer's lifetime.
 
 ## Testability Seams
 
@@ -222,6 +267,7 @@ composers.
 | Space context          | built by `SpaceManager`                       | `createFakeContext()`                                                   |
 | Engine/Fader (Manager) | `Engine`, `Fader`                             | `ManagedEngine`, `Transition` fakes                                     |
 | URL + history (Router) | `window.location`, `window.history`, `window` | `FakeBrowserLocation` (all three in one)                                |
+| Gallery (unit)         | `createGalleryView` in `main.ts`              | injected test registry; `createFakeContext()`                           |
 | Sub-path hosting (E2E) | GitHub Pages `/3d-World/`                     | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174 |
 | Running app (E2E)      | —                                             | `window.__WORLD__` in `npm run build:test` builds                       |
 

@@ -26,8 +26,13 @@ test('an unknown Space still shows "Space not found" under a sub-path', async ({
   await expect(page.getByRole('alert')).toContainText('Space not found');
 });
 
-test('the home route works under a sub-path', async ({ page }) => {
+test('the gallery works under a sub-path, and its card opens the Space', async ({ page }) => {
   await page.goto('./');
+  await expect(page.locator('body')).toHaveAttribute('data-view', 'gallery');
+  await expect(page).toHaveTitle('3D World');
+
+  await page.getByRole('link', { name: /Demo Cube/ }).click();
   await expect(page.locator('body')).toHaveAttribute('data-space-id', 'demo-cube');
-  await expect(page).toHaveTitle('Demo Cube — 3D World');
+  await expect(page.locator('body')).toHaveAttribute('data-space-ready', 'true');
+  expect(new URL(page.url()).pathname).toBe('/3d-World/');
 });

@@ -57,3 +57,10 @@ Format:
 **Decision:** The home route (`#/`) opens the default Space (demo-cube) until the gallery (003) exists. `?space=<id>` is dropped with no redirect. Unrecognised routes redirect to `#/`, replacing the history entry. The page title follows whichever Space is showing, including the default on home.
 **Alternatives:** A placeholder link list on home; keeping `?space=` as a redirecting alias; a "Page not found" page for bad routes.
 **Consequences:** 003 must redefine the home route. Bad links fail quietly to home rather than visibly, so broken links won't be obvious to visitors.
+
+## D-008 — Gallery replaces the default Space on home (2026-10-04)
+
+**Context:** Spec 003 open questions on where the gallery lives, its background, and card previews.
+**Decision:** The gallery is the home route `#/`, ending D-007's "home shows the default Space" rule (supersedes that part of D-007). Behind the cards is a subtle animated starfield drawn with the single renderer, which is still under `prefers-reduced-motion` and is removed whenever a Space is open. Cards show the Space's `thumbnail` image, or a generated placeholder (kind icon plus initials) if it is missing or broken.
+**Alternatives:** Gallery at `#/gallery`; a plain background (lighter, no GPU while browsing); generated placeholders only; text-only cards.
+**Consequences:** 002's "home = demo-cube" tests change. The GPU memory baseline for leak tests is "gallery + backdrop". Thumbnails need licensed images recorded in `CREDITS.md`. demo-cube uses the placeholder for now.
