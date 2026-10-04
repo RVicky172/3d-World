@@ -36,6 +36,7 @@ export function renderGallery(
 
   const heading = document.createElement('h1');
   heading.textContent = SITE_HEADING;
+  heading.tabIndex = -1; // focus fallback when returning from a Space (spec 004, AC-13)
   const list = document.createElement('ul');
   list.className = 'gallery-grid';
 

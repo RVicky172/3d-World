@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { hasWebGL2, prefersReducedMotion } from '../../src/core/capabilities';
+import { hasWebGL2, prefersCoarsePointer, prefersReducedMotion } from '../../src/core/capabilities';
 
 const fakeCanvas = (context: unknown) => ({ getContext: () => context }) as unknown as HTMLCanvasElement;
 
@@ -46,5 +46,23 @@ describe('prefersReducedMotion', () => {
   it('is false when matchMedia is unavailable', () => {
     vi.stubGlobal('matchMedia', undefined);
     expect(prefersReducedMotion()).toBe(false);
+  });
+});
+
+describe('prefersCoarsePointer', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('is true on touch-first devices', () => {
+    const matchMedia = vi.fn((query: string) => ({ matches: true, media: query }) as MediaQueryList);
+    vi.stubGlobal('matchMedia', matchMedia);
+    expect(prefersCoarsePointer()).toBe(true);
+    expect(matchMedia).toHaveBeenCalledWith('(pointer: coarse)');
+  });
+
+  it('is false when matchMedia is unavailable (e.g. jsdom)', () => {
+    vi.stubGlobal('matchMedia', undefined);
+    expect(prefersCoarsePointer()).toBe(false);
   });
 });

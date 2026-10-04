@@ -38,6 +38,11 @@ export interface SpaceInstance {
    * instead of `renderer.render(scene, camera)`. The Space owns resizing and disposing it.
    */
   render?(): void;
+  /**
+   * Where keyboard focus should land when this view replaces another and focus would otherwise be
+   * lost (spec 004, AC-13). `previousSpaceId` is the registry Space just left, if any.
+   */
+  focusTarget?(context: { previousSpaceId: string | null }): HTMLElement | null;
   /** Free everything: geometries, materials, textures, listeners, DOM. */
   dispose(): void;
 }

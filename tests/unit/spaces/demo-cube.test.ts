@@ -34,31 +34,61 @@ describe('demo-cube Space', () => {
     expect((instance.camera as PerspectiveCamera).aspect).toBe(2);
   });
 
-  it('rotation depends only on elapsed time: identical clocks give identical scenes (AC-7)', async () => {
-    const steps = [0, 0.016, 0.016, 0.5, 0.033, 0.2];
+  it('holds the cube still: the camera moves instead (spec 004, D-009)', async () => {
+    const instance = await createDemoCube(createFakeContext());
+    for (let i = 0; i < 120; i++) instance.update(1 / 60, i / 60);
+    expect(findCube(instance).rotation.toArray().slice(0, 3)).toEqual([0, 0, 0]);
+  });
+
+  it('turntable: identical deltas give identical camera positions (001 AC-7, 004 AC-11)', async () => {
+    const steps = [0.016, 0.016, 0.5, 0.033, 0.2];
     const run = async () => {
       const instance = await createDemoCube(createFakeContext());
       const clock = new FakeClock();
+      clock.step(0);
       for (const s of steps) {
         const { delta, elapsed } = clock.step(s);
         instance.update(delta, elapsed);
       }
-      return { rotation: findCube(instance).rotation.toArray(), elapsed: clock.step(0).elapsed };
+      const position = instance.camera.position.toArray();
+      instance.dispose();
+      return position;
     };
 
     const a = await run();
-    const b = await run();
-
-    expect(a.rotation).toEqual(b.rotation);
-    expect(a.rotation[1]).toBeCloseTo(a.elapsed * DEMO_CUBE.rotationSpeed.y);
+    expect(a).toEqual(await run());
+    expect(a[0]).not.toBeCloseTo(0); // the turntable actually moved it
   });
 
-  it('spins slower with reduced motion', async () => {
-    const normal = await createDemoCube(createFakeContext());
-    const reduced = await createDemoCube(createFakeContext({ reducedMotion: true }));
-    normal.update(0.016, 1);
-    reduced.update(0.016, 1);
-    expect(Math.abs(findCube(reduced).rotation.y)).toBeLessThan(Math.abs(findCube(normal).rotation.y));
+  it('keeps the camera still with reduced motion (004 AC-7)', async () => {
+    const instance = await createDemoCube(createFakeContext({ reducedMotion: true }));
+    const start = instance.camera.position.clone();
+    for (let i = 0; i < 600; i++) instance.update(1 / 60, i / 60);
+    expect(instance.camera.position.distanceTo(start)).toBeCloseTo(0, 9);
+  });
+
+  it('opts in to camera controls: the 3D view is focusable with controls UI (004 AC-6)', async () => {
+    const ctx = createFakeContext();
+    const instance = await createDemoCube(ctx);
+    expect(ctx.canvas.getAttribute('tabindex')).toBe('0');
+    expect(ctx.canvas.getAttribute('aria-label')).toMatch(/Demo Cube/);
+    expect(ctx.overlay.querySelector('button.controls-reset')).not.toBeNull();
+    instance.dispose();
+  });
+
+  it('puts keyboard focus on its 3D view when opened from another view (004 AC-13)', async () => {
+    const ctx = createFakeContext();
+    const instance = await createDemoCube(ctx);
+    expect(instance.focusTarget?.({ previousSpaceId: null })).toBe(ctx.canvas);
+    instance.dispose();
+  });
+
+  it('dispose() removes the camera controls (004 AC-8)', async () => {
+    const ctx = createFakeContext();
+    const instance = await createDemoCube(ctx);
+    instance.dispose();
+    expect(ctx.canvas.hasAttribute('tabindex')).toBe(false);
+    expect(ctx.overlay.children).toHaveLength(0);
   });
 
   it('dispose() frees the geometry, material and texture', async () => {

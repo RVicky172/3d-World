@@ -14,3 +14,8 @@ export function hasWebGL2(
 export function prefersReducedMotion(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
+
+/** True on touch-first devices (finger rather than mouse), used for control hints (spec 004). */
+export function prefersCoarsePointer(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+}

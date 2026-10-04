@@ -12,6 +12,8 @@ export interface WorldDebugApi {
   memory(): { geometries: number; textures: number };
   /** Aspect of the active Space's perspective camera, or null (AC-5). */
   cameraAspect(): number | null;
+  /** Snapshot of the active camera (spec 004): position xyz and quaternion xyzw. */
+  cameraPose(): { position: number[]; quaternion: number[] } | null;
 }
 
 export interface DebugDeps {
@@ -54,6 +56,10 @@ export function installDebugHook(
     navigate: (id) => router.navigate(id),
     activeId: () => manager.activeId,
     memory: () => ({ ...engine.renderer.info.memory }),
+    cameraPose: () => {
+      const camera = engine.instance?.camera;
+      return camera ? { position: camera.position.toArray(), quaternion: camera.quaternion.toArray() } : null;
+    },
     cameraAspect: () => {
       const camera = engine.instance?.camera;
       return camera instanceof PerspectiveCamera ? camera.aspect : null;

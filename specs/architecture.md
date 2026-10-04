@@ -1,6 +1,6 @@
 # 3D World — Architecture
 
-**Last updated:** 2026-10-04 · Status: core framework (001), hash router (002) and gallery (003) implemented; camera controls pending (004)
+**Last updated:** 2026-10-04 · Status: core framework (001), hash router (002), gallery (003) and camera controls (004) implemented
 
 ---
 
@@ -37,15 +37,21 @@ src/
     routes.ts             # pure: parseHash() / formatRoute() — the route grammar
     router.ts             # HashRouter: hash → Space, redirects, page title, navigate()
     debug.ts              # window.__WORLD__ test/dev hook (stripped from production)
-    capabilities.ts       # hasWebGL2(), prefersReducedMotion()
+    capabilities.ts       # hasWebGL2(), prefersReducedMotion(), prefersCoarsePointer()
   shared/
+    controls/
+      index.ts            # createCameraControls(): OrbitControls + our keyboard + limits + turntable + UI
+      keyboard.ts         # keyAction() mapping; orbitStep/zoomStep/panStep (pure Spherical maths)
+      turntable.ts        # idle auto-orbit state, advanced only by delta
+      controls-ui.ts      # fading hint, "?" help disclosure, "Reset view" button
+      types.ts            # CameraControlsConfig, CameraControlsOptions, CameraControls
     dispose.ts            # disposeObject3D(): geometries, materials, textures (incl. uniforms, background)
   gallery/
     index.ts              # createGalleryView(): the gallery as a SpaceFactory (cards in overlay, starfield in scene)
     cards.ts              # renderGallery(): heading + list of card links; thumbnails with generated placeholder
     starfield.ts          # STARFIELD config, seeded Points backdrop (1 draw call, still with reduced motion)
   ui/
-    back-link.ts          # permanent "Back to gallery" link, hidden on the gallery via data-view
+    back-link.ts          # permanent "Back to gallery" link, first in the DOM (Tab order); hidden on the gallery
     fader.ts              # Fader: opacity overlay hiding Space swaps (instant with reduced motion)
     messages.ts           # "Space not found" / "Failed to load" alerts in the overlay
     fallback.ts           # WebGL2-unavailable screen
@@ -91,6 +97,7 @@ export interface SpaceInstance {
   update(deltaSeconds: number, elapsedSeconds: number): void; // time comes only from here
   resize(width: number, height: number): void; // update camera aspect etc.; never called with 0
   render?(): void; // opt-in custom rendering (e.g. EffectComposer)
+  focusTarget?(context: { previousSpaceId: string | null }): HTMLElement | null; // where focus lands on a switch (004 AC-13)
   dispose(): void; // free GPU + DOM + listeners
 }
 
@@ -152,7 +159,7 @@ open(B) / openView('gallery', f)
   → await load()                      rejects → close A, show "Failed to load"  → 'load-error'
   → A: abort signal, dispose(); engine.setInstance(null)   (never renders a disposed Space)
   → B = await factory(ctx)            throws  → show "Failed to load"           → 'load-error'
-  → engine.setInstance(B) → await engine.nextFrame() → fader.in()
+  → engine.setInstance(B) → restore lost focus (not on the first view) → await engine.nextFrame() → fader.in()
   → <body data-space-id="B" data-space-status="opened" data-space-ready="true">  → 'opened'
                                       (data-space-id only for registry Spaces)
 ```
@@ -172,6 +179,8 @@ open(B) / openView('gallery', f)
 ### Transition (Fader)
 
 - The Fader is a full-screen element in the background colour. It fades its opacity over 300 ms.
+- **DOM order inside `#app`:** back link → canvas → overlay → fader. The back link is prepended so that Tab order
+  matches the layout (back link → 3D view → view controls); z-index, not DOM order, decides what is drawn on top.
 - **Stacking inside `#app`:** canvas → `.overlay` (z 1, the view's DOM: gallery cards, Space UI, messages) →
   `.fader` (z 2) → `.back-to-gallery` (z 4). The fader hides the whole view, both its 3D and its DOM, while
   switching, so nothing half-removed is ever visible. Steady chrome sits above it.
@@ -241,6 +250,53 @@ titles from `findSpace()` and a setter for `document.title`, then calls `router.
   - Cards sit on a solid `--surface`, so contrast never depends on the backdrop.
   - `:focus-visible` outlines.
 - **Back to gallery:** a permanent link above the fader, hidden by CSS when `body[data-view="gallery"]`.
+- **Focus target:** the card of the Space just left, else the `<h1>` (`tabindex="-1"`, no outline).
+
+## Focus Management (004 AC-13)
+
+Removing a view's DOM can strand keyboard focus. Chrome also keeps its Tab starting point where the removed
+element was. So after mounting a view, the SpaceManager checks whether focus is lost: on `<body>`, disconnected,
+or not visible per `checkVisibility()`. If it is, the manager focuses `instance.focusTarget({ previousSpaceId })`.
+
+- A Space with controls returns its 3D view (the labelled canvas).
+- The gallery returns the card of the Space just left.
+- Never on the first page view, and never away from a still-visible focused element (002's "focus is not
+  stolen").
+
+## Camera Controls (`src/shared/controls/`, 004)
+
+A Space opts in by calling `createCameraControls({ camera, canvas, overlay, signal, reducedMotion, coarsePointer,
+label, config })` in its factory. It calls `controls.update(delta)` from `update()` and `controls.dispose()` from
+`dispose()`. The module ships only in Spaces' lazy chunks.
+
+- **Config (data):** focus point, initial position, distance and polar limits, pan limit, turntable speed and idle
+  delay, and optional keyboard steps.
+- **Mouse and touch: three's `OrbitControls`.**
+  - Drag orbits; wheel or pinch zooms; right-drag, Shift + drag or a two-finger drag pans.
+  - The pan limit uses `cursor` + `maxTargetRadius`.
+  - It sets `touch-action: none` on the canvas while mounted.
+- **Keyboard: our own handler on the canvas.** It is active only while the canvas has focus.
+  - Arrows orbit, Shift + arrows pan, `+`/`=`/`-` zoom, `R` resets. Ctrl, Meta and Alt combinations are left to
+    the browser.
+  - We don't use OrbitControls' keys: they map the other way round and have no zoom or reset.
+  - Each step moves the camera, then calls `controls.update()` so every limit applies.
+- **Focusable 3D view:** while mounted, the canvas has `tabindex="0"`, `role="application"`, an `aria-label` naming
+  the Space and its keys, and a `:focus-visible` ring. All of these are removed on dispose.
+- **Turntable:** an idle auto-orbit through `autoRotate` + `update(delta)`, so it is deterministic by Space time.
+  - It stops on any interaction (the controls' `start`/`end` events, keys, reset) and resumes after `idleDelay`.
+  - It is off under reduced motion, as is damping.
+- **Reset:** flush in-flight damping (one `update()` with damping off), then `OrbitControls.reset()` to the saved
+  initial state. Without the flush, the reset drifts.
+- **UI (`ctx.overlay`):**
+  - a hint, announced politely and dismissed after 4 s of Space time or on the first interaction;
+  - a "?" disclosure (`aria-expanded`/`aria-controls`, Esc closes it and returns focus) listing mouse, touch and
+    keyboard controls;
+  - a "Reset view" button.
+
+  Overlay children take their own pointer events, so the UI never moves the camera.
+
+- **Bundle note:** OrbitControls stays in the lazy chunk, but the three core classes it uses join the shared
+  `three` module that the entry loads (+1.4 KB for 004, D-010).
 
 ## Disposal Rules
 
@@ -257,21 +313,23 @@ composers.
 
 ## Testability Seams
 
-| Seam                   | Real                                          | In tests                                                                |
-| ---------------------- | --------------------------------------------- | ----------------------------------------------------------------------- |
-| Time                   | `createClock()`                               | `FakeClock`                                                             |
-| Frames                 | `requestAnimationFrame`                       | `FakeScheduler.flush(now)`                                              |
-| Visibility             | `document`                                    | `FakeVisibility.set('hidden')`                                          |
-| Renderer (Engine)      | `WebGLRenderer`                               | `createFakeRenderer()` (`RendererLike`)                                 |
-| Resize                 | `ResizeObserver`                              | injected `watchResize` callback                                         |
-| Space context          | built by `SpaceManager`                       | `createFakeContext()`                                                   |
-| Engine/Fader (Manager) | `Engine`, `Fader`                             | `ManagedEngine`, `Transition` fakes                                     |
-| URL + history (Router) | `window.location`, `window.history`, `window` | `FakeBrowserLocation` (all three in one)                                |
-| Gallery (unit)         | `createGalleryView` in `main.ts`              | injected test registry; `createFakeContext()`                           |
-| Sub-path hosting (E2E) | GitHub Pages `/3d-World/`                     | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174 |
-| Running app (E2E)      | —                                             | `window.__WORLD__` in `npm run build:test` builds                       |
+| Seam                   | Real                                          | In tests                                                                              |
+| ---------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Time                   | `createClock()`                               | `FakeClock`                                                                           |
+| Frames                 | `requestAnimationFrame`                       | `FakeScheduler.flush(now)`                                                            |
+| Visibility             | `document`                                    | `FakeVisibility.set('hidden')`                                                        |
+| Renderer (Engine)      | `WebGLRenderer`                               | `createFakeRenderer()` (`RendererLike`)                                               |
+| Resize                 | `ResizeObserver`                              | injected `watchResize` callback                                                       |
+| Space context          | built by `SpaceManager`                       | `createFakeContext()`                                                                 |
+| Engine/Fader (Manager) | `Engine`, `Fader`                             | `ManagedEngine`, `Transition` fakes                                                   |
+| URL + history (Router) | `window.location`, `window.history`, `window` | `FakeBrowserLocation` (all three in one)                                              |
+| Camera controls (unit) | OrbitControls on the real canvas              | real OrbitControls on a jsdom canvas; keyboard/wheel events; `FakeClock`-style deltas |
+| Touch input (E2E)      | fingers                                       | `touchGesture()`: CDP `Input.dispatchTouchEvent` (Chromium)                           |
+| Gallery (unit)         | `createGalleryView` in `main.ts`              | injected test registry; `createFakeContext()`                                         |
+| Sub-path hosting (E2E) | GitHub Pages `/3d-World/`                     | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174               |
+| Running app (E2E)      | —                                             | `window.__WORLD__` in `npm run build:test` builds                                     |
 
-`window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory` and `cameraAspect`. It is installed behind a
+`window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory`, `cameraAspect` and `cameraPose`. It is installed behind a
 literal `import.meta.env.MODE !== 'production'` check, so production bundles drop it. `npm run build` verifies this.
 
 ## Multi-Object Pattern (Solar System, planned — features 020–023)

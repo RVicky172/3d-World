@@ -64,3 +64,17 @@ Format:
 **Decision:** The gallery is the home route `#/`, ending D-007's "home shows the default Space" rule (supersedes that part of D-007). Behind the cards is a subtle animated starfield drawn with the single renderer, which is still under `prefers-reduced-motion` and is removed whenever a Space is open. Cards show the Space's `thumbnail` image, or a generated placeholder (kind icon plus initials) if it is missing or broken.
 **Alternatives:** Gallery at `#/gallery`; a plain background (lighter, no GPU while browsing); generated placeholders only; text-only cards.
 **Consequences:** 002's "home = demo-cube" tests change. The GPU memory baseline for leak tests is "gallery + backdrop". Thumbnails need licensed images recorded in `CREDITS.md`. demo-cube uses the placeholder for now.
+
+## D-009 — Camera controls behaviour for 004 (2026-10-04)
+
+**Context:** Spec 004 open questions on idle motion, panning, keyboard scope and discoverability.
+**Decision:** Idle Spaces with controls use a camera turntable that stops on any interaction and resumes after a Space-defined delay; the subject holds still, and reduced motion disables all automatic movement. Panning is on everywhere, clamped to a Space-defined pan limit. Keyboard controls work only while the focusable 3D view has focus. Discoverability comes from a fading hint, a persistent "?" help panel and a "Reset view" button.
+**Alternatives:** Subject keeps its own animation; no automatic motion; per-Space or no panning; page-wide keys; hint-only or buttons-only.
+**Consequences:** demo-cube stops self-rotating (a 001 behaviour change). The canvas becomes focusable inside Spaces, so Tab order must be back link → 3D view → help/reset. Touch users get an on-screen reset because they have no `R` key.
+
+## D-010 — Focus management on view switches; 1.5 KB entry allowance for 004 (2026-10-04)
+
+**Context:** During 004 T022, activating a gallery card removed the focused element, so keyboard focus was lost and Tab reached the help buttons before "Back to gallery" and the 3D view. Separately, the controls grew the entry by 1.2 KB against a 0.5 KB NFR.
+**Decision:** (1) New 004 AC-13: when focus would otherwise be lost on a view switch (never on the first page view, and never from a still-visible focused element), focus moves to the new view's start. That is the 3D view for a Space, and on the gallery the card of the Space just left (or the heading). This clarifies 002's "focus is not stolen". (2) The 004 entry NFR is amended to ≤ 1.5 KB.
+**Alternatives:** Gallery heading instead of the card (loses the visitor's place); no focus management (keyboard users lose focus). Restructuring chunks to save size (no real saving, since startup loads `three` anyway).
+**Consequences:** `SpaceInstance` gains an optional `focusTarget()`. The size growth comes from `three` core classes being shared with lazy chunks: any Space importing new parts of three core can grow the entry, so watch the bundle-check line.

@@ -391,3 +391,102 @@ describe('SpaceManager', () => {
     });
   });
 });
+
+describe('SpaceManager focus management (spec 004, AC-13)', () => {
+  const makeEngine = () => ({
+    renderer: { domElement: document.createElement('canvas') } as unknown as WebGLRenderer,
+    overlay: document.createElement('div'),
+    setInstance: () => {},
+    nextFrame: () => Promise.resolve(),
+  });
+  const instantFader = { out: async () => {}, in: async () => {} };
+
+  /** A view whose DOM holds a focusable element, with a spy-able focus target. */
+  const view = (name: string) => {
+    const target = document.createElement('button');
+    target.textContent = `${name} start`;
+    const focusTarget = vi.fn(() => target);
+    const factory: SpaceFactory = async (ctx) => {
+      ctx.overlay.append(target);
+      return {
+        scene: new Scene(),
+        camera: new PerspectiveCamera(),
+        update: () => {},
+        resize: () => {},
+        focusTarget,
+        dispose: () => target.remove(),
+      };
+    };
+    return { target, focusTarget, factory };
+  };
+
+  const setup = () => {
+    const engine = makeEngine();
+    document.body.append(engine.overlay);
+    const space = view('space');
+    const registry: SpaceMeta[] = [
+      {
+        id: 'a',
+        title: 'A',
+        description: 'A',
+        kind: 'single',
+        load: async () => ({ default: space.factory }),
+      },
+    ];
+    const manager = new SpaceManager({
+      engine,
+      fader: instantFader,
+      reducedMotion: true,
+      registry,
+      statusElement: document.createElement('div'),
+    });
+    return { engine, manager, space };
+  };
+
+  it('does not move focus on the first page view', async () => {
+    const { manager, space } = setup();
+    await manager.open('a');
+    expect(space.focusTarget).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('moves focus to the new view when the focused element was removed with the old view', async () => {
+    const { manager, space } = setup();
+    const gallery = view('gallery');
+    await manager.openView('gallery', gallery.factory);
+    gallery.target.focus(); // e.g. the card the visitor activated
+    expect(document.activeElement).toBe(gallery.target);
+
+    await manager.open('a');
+
+    expect(space.focusTarget).toHaveBeenCalledWith({ previousSpaceId: null });
+    expect(document.activeElement).toBe(space.target);
+  });
+
+  it('tells the gallery which Space was just left, so it can focus that card', async () => {
+    const { manager, space } = setup();
+    const gallery = view('gallery');
+    await manager.openView('gallery', gallery.factory);
+    await manager.open('a');
+    space.target.focus();
+
+    await manager.openView('gallery', gallery.factory);
+
+    expect(gallery.focusTarget).toHaveBeenLastCalledWith({ previousSpaceId: 'a' });
+    expect(document.activeElement).toBe(gallery.target);
+  });
+
+  it('never takes focus from something still visible and focused', async () => {
+    const { manager } = setup();
+    const gallery = view('gallery');
+    await manager.openView('gallery', gallery.factory);
+    const elsewhere = document.createElement('button');
+    document.body.append(elsewhere);
+    elsewhere.focus();
+
+    await manager.open('a');
+
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
+});

@@ -11,6 +11,13 @@ describe('createBackLink', () => {
     expect(link.classList.contains('back-to-gallery')).toBe(true);
   });
 
+  it('goes first in the container, so Tab order matches the layout (spec 004, AC-9)', () => {
+    const container = document.createElement('div');
+    container.append(document.createElement('canvas'), document.createElement('div'));
+    const link = createBackLink(container);
+    expect(container.firstElementChild).toBe(link);
+  });
+
   it('is named "Back to gallery" by its visible text; the arrow is decorative', () => {
     const link = createBackLink(document.createElement('div'));
     const visibleText = [...link.childNodes]

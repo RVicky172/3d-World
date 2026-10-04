@@ -4,9 +4,9 @@
 
 ## Current State (2026-10-04)
 
-- **Phase:** 1 (Core Engine & Gallery Shell) — 001, 002, 003 done; 004 (camera controls) and 005 (WebGL/reduced-motion gaps) not started.
-- **Active feature:** none. **003-gallery is Implemented** (2026-10-04): 13 ACs verified, 217 unit + 40 E2E, entry 132.8 KB gz. 001–003 are committed and pushed to github.com/RVicky172/3d-World (main).
-- **Next step:** `/spec-new` for **004 — shared camera controls** (orbit/zoom/pan; mouse, touch, keyboard; OrbitControls from three/examples per tech-stack). Note for 005: WebGL fallback and reduced-motion fades already exist; its spec should cover only the gaps.
+- **Phase:** 1 (Core Engine & Gallery Shell) — 001–004 done; only 005 (WebGL fallback / reduced-motion gaps) left in Phase 1.
+- **Active feature:** none. **004-camera-controls is Implemented** (2026-10-04): 13 ACs verified, 293 unit + 61 E2E, entry 134.2 KB gzipped. 001–004 are committed and pushed to github.com/RVicky172/3d-World (main). Known, deferred: on narrow portrait phones demo-cube nearly fills the width (fixed camera distance); auto-framing is planned for 010.
+- **Next step:** (next session) `/spec-new` for **005 — WebGL capability check + fallback, reduced motion**. Much already exists (WebGL2 fallback screen from 000; reduced motion in Fader, starfield, turntable and damping), so the spec should audit and cover only the gaps (e.g. context loss, a runtime motion toggle?). Phase 1 then ends.
 - **Blockers:** none
 
 ## Files

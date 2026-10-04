@@ -10,6 +10,16 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 
 - three r186 lazily creates a shared **DFG LUT** texture (`getDFGLUT()`) the first time any physically based material (`MeshStandardMaterial`/`MeshPhysicalMaterial`) renders, and keeps it for the renderer's lifetime. `renderer.info.memory.textures` therefore goes +1 once and never back. GPU-leak tests must take their baseline **after a warm-up visit** to a PBR Space. A real leak still shows as growth per cycle (verified: disabling gallery dispose → 12 geometries vs 2).
 
+## Three.js — OrbitControls (r186)
+
+- Built-in keys are the opposite of our spec (plain arrows pan, Shift/Ctrl + arrows rotate) and have no zoom or reset, so we never call `listenToKeyEvents` and use `src/shared/controls/keyboard.ts` instead.
+- `enableDamping` smooths **rotate and pan only**. Wheel/pinch zoom is applied in full on the next `update()`. Test easing with a pointer drag (E2E), not the wheel.
+- `reset()` calls `update()`, which applies leftover damping velocity and drifts from the saved view. Flush first: `enableDamping = false; update(); reset();`, then restore damping.
+- `cursor` + `maxTargetRadius` is a built-in pan limit (clamps `target` around `cursor`).
+- `update(deltaTime)` makes `autoRotate` time-based, so the turntable is deterministic. Without the argument it assumes 60 fps.
+- Poses round-trip through `Spherical`, so expect `2e-16`-style noise. Compare with `toBeCloseTo`, not `toEqual`.
+- It sets `touch-action: none` on its element and restores `''` in `dispose()`.
+
 ## Three.js — renderer sizing
 
 - Call `renderer.setSize(w, h, false)` when a `ResizeObserver` watches the container: with the default `updateStyle=true` Three writes inline px sizes onto the canvas, which then fights the CSS `100%` sizing. Let CSS size the canvas; set only the drawing buffer.
@@ -17,6 +27,9 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 
 ## Testing
 
+- **Multi-touch in E2E:** `touchGesture()` in `tests/e2e/fixtures.ts` sends CDP `Input.dispatchTouchEvent`. Chromium turns it into pointer events, which OrbitControls handles (one-finger orbit, pinch, two-finger pan). It needs a context with `hasTouch: true` (and `isMobile` for coarse-pointer wording).
+- `page.mouse.wheel()` scrolls wherever the mouse **currently** is. After a drag that ended over the canvas, a wheel meant for a button zooms the camera. Hover the target first.
+- **Camera assertions:** compare poses with `rotationBetween()` (degrees) and `distanceBetween()` plus tolerances, never exact equality. Motion tests: the turntable turns ~2° per 300 ms, and "stopped" is < 0.5°. Stable over 5 repeats in SwiftShader.
 - "Non-blank canvas" = `canvasCoverage(page)` (fraction of pixels differing from the corner/background pixel), not a distinct-colour count — colour counts depend on the model's rotation at capture time and flaked (9 vs >10). Its blank-canvas guard lives in the 001 not-found E2E test.
 - Negative E2E checks ("did not re-open") need a detector proven to fire: `watchForReopen` has its own positive test in `router.spec.ts`.
 - Playwright `webServer` can be an array; per-server `env` is merged with `process.env` (no `cross-env` needed). The `subpath` project serves `/3d-World/`; its tests must use relative URLs (`goto("#/space/x")`, `goto("./")`) because a leading `/` drops the base path.
@@ -37,6 +50,9 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 
 ## DOM / CSS
 
+- Removing the focused element (e.g. the gallery card the visitor activated) drops focus to `<body>`, but Chrome keeps the sequential-focus starting point where the removed node was. The next Tab then continues from there, not from the top. SpaceManager now restores lost focus via `SpaceInstance.focusTarget()` (004 AC-13). A same-document `page.goto('#…')` does not reset that starting point either, so it is not a "fresh load" in tests.
+- `element.checkVisibility()` detects focus stranded on a `display: none` element, such as the back link on the gallery. jsdom lacks it, so guard with `typeof … === 'function'`.
+- TypeScript 6 DOM types declare `HTMLElement.hidden` as `boolean | "until-found"`, so `setOpen(panel.hidden)` fails to typecheck. Keep disclosure state in `aria-expanded` and read it from there.
 - Stacking since 003: canvas → `.overlay` (z 1, view DOM) → `.fader` (z 2) → `.back-to-gallery` (z 4). The fader hides the whole view while switching. Chrome that must stay steady goes above it, and `data-view` is set at the _start_ of an open so chrome never flashes.
 - jsdom lacks `HTMLImageElement.loading`: `img.loading = "lazy"` sets nothing there. Use `img.setAttribute("loading", "lazy")` (works in browsers too).
 - Colours that tests check for contrast must be solid tokens (`--surface`, `--border`): `color-mix()` computes to `color(srgb …)` strings, not `rgb()`.
@@ -46,6 +62,7 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 
 ## Tooling
 
+- **three.js is one shared module.** Any Space that uses new parts of three core (e.g. OrbitControls pulling in Spherical, MOUSE/TOUCH, the Controls base class) grows the **entry** bundle, even though the Space's own code is lazy, because the bundler keeps all of `three` in the chunk the entry already loads. 004 measured +1.4 KB (D-010). Watch the bundle-check line when adding Spaces.
 - Piping a Node script via `node - <<EOF` runs it through Node 24's TypeScript stripping, and regex escapes like `/` inside template literals got mangled, so string matches silently missed. For edits containing regexes or backticks, use the Edit tool.
 - A temporary "bridge" to keep tests green between tasks only works if the code under it keeps its old semantics. Check which E2E tests depend on the changed behaviour before promising a task boundary.
 - Don't pipe `npm run check` through `grep` and then chain more steps with `&&`: the pipeline's exit status is grep's, so a failing typecheck slips through (it ticked tasks once). Check `$?` of `npm run check` itself before ticking.

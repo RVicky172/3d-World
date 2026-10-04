@@ -11,6 +11,76 @@ Newest first. One entry per working session.
 
 ---
 
+## 2026-10-04 — 004-camera-controls ✔️ Implemented
+
+**Done:** Definition of Done verified:
+
+- `npm run check` (293 unit), exit 0;
+- `npm run build` + bundle check: entry 134.2 KB gzipped (+1.4 KB vs 003; amended NFR ≤ 1.5 KB, D-010), demo-cube chunk 6.9 KB;
+- `npm run test:e2e` (61 incl. touch and sub-path), no console errors;
+- Prettier clean.
+
+Coverage: total 98 % lines; `src/shared/controls/*` 100 %. Ticked AC-1…AC-13, spec → Implemented, roadmap 004 → ✔️. 60 FPS not measured (no GPU in CI).
+**Next:** commit 004; `/spec-new` for 005.
+**Blockers:** none
+
+## 2026-10-04 — 004-camera-controls (T040)
+
+**Done:** `specs/architecture.md`: status, `src/shared/controls/` in layout, `focusTarget` in the contract, focus restore in the open sequence, DOM vs stacking order, new **Focus Management** and **Camera Controls** sections, seams rows (controls unit, CDP touch), `cameraPose` in the debug hook. OrbitControls quirks were already in learnings (T016).
+**Next:** `/spec-verify 004`.
+**Blockers:** none
+
+## 2026-10-04 — 004-camera-controls (T030–T031)
+
+**Done:** `tests/e2e/controls.spec.ts`, 21 tests:
+
+- mouse orbit, zoom and pan (right-drag and Shift+drag);
+- keyboard only while the canvas has focus, with a focus ring and accessible name;
+- zoom and pan limits (cube stays on screen);
+- reset by `R` and by the button;
+- no controls on the gallery;
+- 10 enter/leave cycles leave nothing behind;
+- the UI never moves the camera, and Tab order is back → 3D view → ? → reset;
+- hint (interaction and timeout), help panel with Esc;
+- resize keeps the view;
+- AC-13 focus round trip, and no focus on first load;
+- CDP multi-touch (orbit, pinch, two-finger pan, no page scroll);
+- no inertia / no auto motion under reduced motion; turntable while idle; glide after a flick; turntable waits after interaction.
+
+Fixtures gained `cameraPose`, `rotationBetween`, `distanceBetween`, `radius` and `touchGesture`. Fixed one test bug (wheel landed on the canvas after a drag). Timing tests stable at 5× repeat. 293 unit + 61 E2E green.
+**Next:** T040 docs, then verify.
+**Blockers:** none
+
+## 2026-10-04 — 004-camera-controls (T020–T023)
+
+**Done:**
+
+- T020: back link prepended (Tab order).
+- T021: `__WORLD__.cameraPose()`.
+- T022: demo-cube adopts `createCameraControls`. Self-rotation removed; camera starts ~23° up so the top face shows; the turntable is deterministic by delta; `prefersCoarsePointer()` helper.
+- T022 surfaced two issues, both decided by the user (D-010):
+  - lost keyboard focus after activating a card → new **AC-13** + **T023**: `SpaceInstance.focusTarget()`; SpaceManager restores lost focus (never on first view, never from a visible focused element); gallery returns the card just left (else a `tabindex=-1` heading); demo-cube returns the 3D view. 003's AC-7 E2E updated.
+  - entry +1.4 KB (three core classes shared with lazy chunks) → NFR amended 0.5 → 1.5 KB.
+- Screenshots checked (desktop, help panel, 360 px phone); help-panel columns aligned.
+
+293 unit + 40 E2E green. demo-cube chunk 6.9 KB gzipped.
+**Next:** T030–T031 controls E2E.
+**Blockers:** none
+
+## 2026-10-04 — 004-camera-controls (T010–T016)
+
+**Done:** `src/shared/controls/`:
+
+- `keyboard.ts`: `keyAction` mapping; `orbitStep`, `zoomStep`, `panStep`.
+- `turntable.ts`: delta-driven idle state.
+- `controls-ui.ts`: hint (aria-live, 4 s of Space time), "?" disclosure panel with Esc, "Reset view".
+- `index.ts`: `createCameraControls` wrapping OrbitControls — limits incl. `cursor`/`maxTargetRadius` pan clamp, damping/turntable off under reduced motion, focus-scoped keys, canvas a11y attributes, reset flush, full dispose.
+- CSS for the controls UI and the canvas focus ring.
+
+62 new unit tests; 279 unit + 40 E2E green. The easing check moved to T031 (damping doesn't apply to zoom).
+**Next:** T020–T022 integration.
+**Blockers:** none
+
 ## 2026-10-04 — 003-gallery ✔️ Implemented
 
 **Done:** Definition of Done verified: `npm run check` (217 unit), `npm run build` + bundle check (132.8 KB gz, +2.0 KB vs 002; NFR ≤ 5 KB), `npm run test:e2e` (40 incl. 3 `subpath`), Prettier clean, no console errors. Coverage total 97.2 % lines; gallery/router/back-link 95–100 %, space-manager 98.6 %. Ticked AC-1…AC-13, spec → Implemented, roadmap 003 → ✔️. NFRs not measured: 60 FPS backdrop and 1 s interactivity (no GPU in CI), argued by design.

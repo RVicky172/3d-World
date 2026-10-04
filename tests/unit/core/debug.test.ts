@@ -83,5 +83,20 @@ describe('installDebugHook', () => {
       deps.engine.instance = instanceWith(new OrthographicCamera());
       expect(target.__WORLD__?.cameraAspect()).toBeNull();
     });
+
+    it('cameraPose() reports the active camera position and orientation as plain arrays (spec 004)', () => {
+      expect(target.__WORLD__?.cameraPose()).toBeNull();
+
+      const camera = new PerspectiveCamera();
+      camera.position.set(1, 2, 3);
+      camera.lookAt(0, 0, 0);
+      deps.engine.instance = instanceWith(camera);
+
+      const pose = target.__WORLD__?.cameraPose();
+      expect(pose?.position).toEqual([1, 2, 3]);
+      expect(pose?.quaternion).toEqual(camera.quaternion.toArray());
+      camera.position.set(9, 9, 9);
+      expect(pose?.position).toEqual([1, 2, 3]); // a snapshot, not a live reference
+    });
   });
 });

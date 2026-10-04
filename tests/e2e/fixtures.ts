@@ -68,3 +68,49 @@ export function canvasCoverage(page: Page): Promise<number> {
     return differing / sampled;
   });
 }
+
+/** Camera pose from the test hook (spec 004). */
+export type CameraPose = { position: number[]; quaternion: number[] };
+
+export async function cameraPose(page: Page): Promise<CameraPose> {
+  const pose = await page.evaluate(() => window.__WORLD__?.cameraPose() ?? null);
+  if (!pose) throw new Error('no active camera');
+  return pose;
+}
+
+/** Angle in degrees between two camera orientations. */
+export function rotationBetween(a: CameraPose, b: CameraPose): number {
+  const dot = Math.abs(a.quaternion.reduce((sum, q, i) => sum + q * (b.quaternion[i] ?? 0), 0));
+  return (2 * Math.acos(Math.min(1, dot)) * 180) / Math.PI;
+}
+
+export function distanceBetween(a: CameraPose, b: CameraPose): number {
+  return Math.hypot(...a.position.map((p, i) => p - (b.position[i] ?? 0)));
+}
+
+/** Distance of the camera from the origin (demo-cube's home focus). */
+export function radius(pose: CameraPose): number {
+  return Math.hypot(...pose.position);
+}
+
+type Point = { x: number; y: number };
+
+/**
+ * Multi-touch gesture via Chrome DevTools Protocol (Playwright's touchscreen only taps).
+ * Each finger moves from its `from` to its `to` point in `steps`. Chromium only.
+ */
+export async function touchGesture(page: Page, fingers: Array<{ from: Point; to: Point }>, steps = 8) {
+  const cdp = await page.context().newCDPSession(page);
+  const at = (t: number) =>
+    fingers.map(({ from, to }, id) => ({
+      x: from.x + (to.x - from.x) * t,
+      y: from.y + (to.y - from.y) * t,
+      id,
+    }));
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(0) });
+  for (let i = 1; i <= steps; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(i / steps) });
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+}

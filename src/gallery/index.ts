@@ -1,4 +1,5 @@
 import { PerspectiveCamera, Scene } from 'three';
+import { formatRoute } from '../core/routes';
 import type { SpaceFactory, SpaceMeta } from '../core/types';
 import { disposeObject3D } from '../shared/dispose';
 import { renderGallery } from './cards';
@@ -30,6 +31,14 @@ export function createGalleryView({ spaces, baseUrl }: GalleryViewOptions): Spac
       camera,
       update(_delta, elapsed) {
         starfield.update(elapsed);
+      },
+      focusTarget({ previousSpaceId }) {
+        // Return keyboard users to the card they opened; else the heading (spec 004, AC-13).
+        const href = previousSpaceId === null ? null : formatRoute({ name: 'space', id: previousSpaceId });
+        const card = [...gallery.querySelectorAll<HTMLAnchorElement>('a.card')].find(
+          (a) => a.getAttribute('href') === href,
+        );
+        return card ?? gallery.querySelector<HTMLElement>('h1');
       },
       resize(width, height) {
         camera.aspect = width / height;

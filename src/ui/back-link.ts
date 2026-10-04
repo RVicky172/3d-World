@@ -14,6 +14,6 @@ export function createBackLink(container: HTMLElement): HTMLAnchorElement {
   arrow.textContent = '←';
 
   link.append(arrow, ' Back to gallery');
-  container.append(link);
+  container.prepend(link); // first in DOM = first in Tab order (spec 004, AC-9); z-index keeps it on top
   return link;
 }

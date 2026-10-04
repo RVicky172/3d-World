@@ -67,4 +67,23 @@ describe('createGalleryView', () => {
     expect(ctx.overlay.contains(other)).toBe(true);
     spies.forEach((s) => expect(s).toHaveBeenCalledOnce());
   });
+
+  describe('focusTarget (spec 004, AC-13)', () => {
+    it('returns the card of the Space just left, so keyboard users keep their place', async () => {
+      const ctx = createFakeContext();
+      const view = await createGalleryView({ spaces: testRegistry, baseUrl: '/' })(ctx);
+      const target = view.focusTarget?.({ previousSpaceId: 'two' });
+      expect(target?.getAttribute('href')).toBe('#/space/two');
+    });
+
+    it('falls back to the gallery heading, which is programmatically focusable', async () => {
+      const ctx = createFakeContext();
+      const view = await createGalleryView({ spaces: testRegistry, baseUrl: '/' })(ctx);
+      for (const previousSpaceId of [null, 'not-in-registry']) {
+        const target = view.focusTarget?.({ previousSpaceId });
+        expect(target?.tagName).toBe('H1');
+        expect(target?.getAttribute('tabindex')).toBe('-1');
+      }
+    });
+  });
 });

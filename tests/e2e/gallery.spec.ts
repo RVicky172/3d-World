@@ -119,10 +119,13 @@ test('AC-7: "Back to gallery" is hidden on the gallery, shown on Space screens, 
   await card(page).click();
   await expectSpace(page, 'demo-cube');
   await expect(backLink(page)).toBeVisible();
-  await page.keyboard.press('Tab');
+  // Since 004 AC-13, focus lands on the 3D view; the back link is just before it in Tab order (AC-9).
+  await expect(page.locator('#app canvas')).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
   await expect(backLink(page)).toBeFocused();
   await page.keyboard.press('Enter');
   await expectGallery(page);
+  await expect(card(page)).toBeFocused(); // back to the card the visitor opened (004 AC-13)
 
   await page.goto('/#/space/nope');
   await expect(page.getByRole('alert')).toContainText('Space not found');

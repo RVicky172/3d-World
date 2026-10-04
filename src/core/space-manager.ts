@@ -59,6 +59,8 @@ export class SpaceManager {
   private readonly status: HTMLElement;
   private mounted: Mounted | null = null;
   private sequence = 0;
+  /** False until the first view mounts: focus is never moved on the initial page view (AC-13). */
+  private hasMounted = false;
 
   constructor(options: SpaceManagerOptions) {
     this.engine = options.engine;
@@ -123,6 +125,7 @@ export class SpaceManager {
       return this.fail('load-error', label, error);
     }
 
+    const previousSpaceId = this.mounted?.id ?? null;
     this.unmount();
 
     const controller = new AbortController();
@@ -146,6 +149,8 @@ export class SpaceManager {
 
     this.mounted = { view, id, label, instance, controller };
     this.engine.setInstance(instance);
+    if (this.hasMounted) restoreLostFocus(instance, previousSpaceId);
+    this.hasMounted = true;
     await this.engine.nextFrame();
     if (isStale()) return 'superseded';
 
@@ -190,4 +195,19 @@ export class SpaceManager {
     delete this.status.dataset.spaceId;
     delete this.status.dataset.spaceStatus;
   }
+}
+
+/**
+ * Spec 004, AC-13: if the view switch left keyboard focus nowhere (the focused element was removed or
+ * hidden), move it to the new view's natural start. Focus resting on something still visible is left alone.
+ */
+function restoreLostFocus(instance: SpaceInstance, previousSpaceId: string | null): void {
+  const active = document.activeElement;
+  const lost =
+    !active ||
+    active === document.body ||
+    !active.isConnected ||
+    (typeof active.checkVisibility === 'function' && !active.checkVisibility());
+  if (!lost) return;
+  instance.focusTarget?.({ previousSpaceId })?.focus({ preventScroll: true });
 }
