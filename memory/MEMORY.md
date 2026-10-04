@@ -4,9 +4,9 @@
 
 ## Current State (2026-10-04)
 
-- **Phase:** 1 (Core Engine & Gallery Shell) — 001 done; 002–005 not started.
-- **Active feature:** none. **001-space-framework is Implemented** (2026-10-04): all 11 ACs verified, 105 unit + 7 E2E tests, entry 130.3 KB gz.
-- **Next step:** `/spec-new` for **002 — hash router & deep links** (replaces the temporary `?space=<id>` in `src/main.ts`). Note for 005: WebGL fallback and reduced-motion fades already exist; its spec should cover only the gaps.
+- **Phase:** 1 (Core Engine & Gallery Shell) — 001 and 002 done; 003–005 not started.
+- **Active feature:** none. **002-hash-router is Implemented** (2026-10-04): 12 ACs verified, 173 unit + 23 E2E, entry 130.8 KB gz. 001 and 002 are committed and pushed to github.com/RVicky172/3d-World (main).
+- **Next step:** `/spec-new` for **003 — gallery page**. 003 must redefine the home route (today: default Space, D-007) and can use `router.navigate(id)` for cards. Note for 005: WebGL fallback and reduced-motion fades already exist; its spec should cover only the gaps.
 - **Blockers:** none
 
 ## Files

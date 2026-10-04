@@ -1,6 +1,6 @@
 # 3D World — Architecture
 
-**Last updated:** 2026-10-04 · Status: core framework implemented (feature 001); router, gallery and controls pending (002–004)
+**Last updated:** 2026-10-04 · Status: core framework (001) and hash router (002) implemented; gallery and controls pending (003–004)
 
 ---
 
@@ -14,18 +14,22 @@
 - **SpaceManager**: loads a Space module on demand, creates it, hands it to the Engine, and disposes the previous one.
   It coordinates the fade transition and reports outcomes.
 - **Registry**: a static list of Space metadata with lazy `import()` loaders. Nothing is loaded until it is opened.
+- **HashRouter**: maps the URL hash to the Space that should be showing and asks the SpaceManager to open it.
+  Deep links, Back/Forward and code navigation all go through it.
 
 ## Directory Layout
 
 ```text
 src/
-  main.ts                 # bootstrap: WebGL check → renderer → Engine → Fader → SpaceManager → open ?space=
+  main.ts                 # bootstrap: WebGL check → renderer → Engine → Fader → SpaceManager → HashRouter.start()
   core/
     types.ts              # the Space contract + RendererLike + OpenResult
     clock.ts              # Clock, createClock(), FakeClock: timestamps → { delta, elapsed }
     render-loop.ts        # RenderLoop: injectable Scheduler + VisibilitySource; pauses when hidden
     engine.ts             # Engine: renderer, canvas, overlay, resize, per-frame update/render
     space-manager.ts      # SpaceManager: open/close, ordering, supersession, errors, status attributes
+    routes.ts             # pure: parseHash() / formatRoute() — the route grammar
+    router.ts             # HashRouter: hash → Space, redirects, page title, navigate()
     debug.ts              # window.__WORLD__ test/dev hook (stripped from production)
     capabilities.ts       # hasWebGL2(), prefersReducedMotion()
   shared/
@@ -45,7 +49,7 @@ scripts/
 tests/
   helpers/fakes.ts        # FakeScheduler, FakeVisibility, createFakeRenderer, createFakeContext
   unit/                   # Vitest, mirrors src/ (+ scripts/)
-  e2e/                    # Playwright; fixtures.ts fails tests on console errors
+  e2e/                    # Playwright; fixtures.ts fails tests on console errors; subpath.spec.ts runs on /3d-World/
 public/
   assets/<space-id>/      # models, textures (licensed; see CREDITS.md)
 ```
@@ -154,6 +158,46 @@ open(B)
 - With `prefers-reduced-motion`, swaps are instant.
 - Its promises resolve on a timer rather than on `transitionend`, which doesn't always fire.
 
+## Routing (HashRouter)
+
+Addresses live in the URL hash, so the site works on any static host, including a sub-path such as
+`/3d-World/` on GitHub Pages, with no server configuration.
+
+### Route grammar (`src/core/routes.ts`)
+
+```text
+""  "#"  "#/"                       → home        → shows the default Space (demo-cube until the gallery, 003)
+"#/space/<id>"  "#/space/<id>/"     → space(id)   → id is percent-decoded; malformed encoding keeps the raw id
+anything else                       → unknown     → replaced with "#/" (no history entry left behind)
+```
+
+`parseHash()` never throws. `formatRoute()` is its inverse, and ids round-trip through encoding. Ids are
+case-sensitive.
+
+### Router rules (`src/core/router.ts`)
+
+- **One path in:** Back/Forward, typed URLs, links and `navigate(id)` all arrive as `hashchange`, so none of them
+  reload the page. `start()` handles the address the page loaded with.
+- **Unknown routes:** `history.replaceState(…, '#/')`, then the router handles home directly, because
+  `replaceState` fires no event.
+- **Skip if already showing:** the router remembers the Space it last requested. If a new route resolves to that same
+  Space (for example `#/` ↔ `#/space/demo-cube`), it does nothing. A failed open (`not-found` or `load-error`)
+  clears this memory, so the same Space can be retried.
+- **`navigate(id)`** assigns `location.hash`, which adds exactly one history entry. It does nothing if that Space is
+  already showing. If the address is already correct after a failed open, it retries directly, because assigning the
+  same hash fires no event.
+- **Page title:** `"<Space title> — 3D World"` once a Space has opened, and `"3D World"` after not-found or
+  load-error.
+- **Stale results:** every request carries a sequence number. A result from an older request is ignored, even if
+  it is not `superseded`. Combined with the SpaceManager's own supersession, rapid navigation always ends on the
+  latest address.
+
+### Startup
+
+`main.ts` creates the `HashRouter` after the SpaceManager. It passes in `window.location`, `window.history`,
+`window` (for events), `manager.open`, titles from `findSpace()` and a setter for `document.title`, then calls
+`router.start()`. The temporary `?space=` parameter from 001 is gone, and query strings are ignored.
+
 ## Disposal Rules
 
 A Space's `dispose()` must free everything it created: geometries, materials, textures, listeners, DOM elements and
@@ -168,18 +212,20 @@ composers.
 
 ## Testability Seams
 
-| Seam                   | Real                    | In tests                                          |
-| ---------------------- | ----------------------- | ------------------------------------------------- |
-| Time                   | `createClock()`         | `FakeClock`                                       |
-| Frames                 | `requestAnimationFrame` | `FakeScheduler.flush(now)`                        |
-| Visibility             | `document`              | `FakeVisibility.set('hidden')`                    |
-| Renderer (Engine)      | `WebGLRenderer`         | `createFakeRenderer()` (`RendererLike`)           |
-| Resize                 | `ResizeObserver`        | injected `watchResize` callback                   |
-| Space context          | built by `SpaceManager` | `createFakeContext()`                             |
-| Engine/Fader (Manager) | `Engine`, `Fader`       | `ManagedEngine`, `Transition` fakes               |
-| Running app (E2E)      | —                       | `window.__WORLD__` in `npm run build:test` builds |
+| Seam                   | Real                                          | In tests                                                                |
+| ---------------------- | --------------------------------------------- | ----------------------------------------------------------------------- |
+| Time                   | `createClock()`                               | `FakeClock`                                                             |
+| Frames                 | `requestAnimationFrame`                       | `FakeScheduler.flush(now)`                                              |
+| Visibility             | `document`                                    | `FakeVisibility.set('hidden')`                                          |
+| Renderer (Engine)      | `WebGLRenderer`                               | `createFakeRenderer()` (`RendererLike`)                                 |
+| Resize                 | `ResizeObserver`                              | injected `watchResize` callback                                         |
+| Space context          | built by `SpaceManager`                       | `createFakeContext()`                                                   |
+| Engine/Fader (Manager) | `Engine`, `Fader`                             | `ManagedEngine`, `Transition` fakes                                     |
+| URL + history (Router) | `window.location`, `window.history`, `window` | `FakeBrowserLocation` (all three in one)                                |
+| Sub-path hosting (E2E) | GitHub Pages `/3d-World/`                     | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174 |
+| Running app (E2E)      | —                                             | `window.__WORLD__` in `npm run build:test` builds                       |
 
-`window.__WORLD__` provides `open`, `close`, `activeId`, `memory` and `cameraAspect`. It is installed behind a
+`window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory` and `cameraAspect`. It is installed behind a
 literal `import.meta.env.MODE !== 'production'` check, so production bundles drop it. `npm run build` verifies this.
 
 ## Multi-Object Pattern (Solar System, planned — features 020–023)

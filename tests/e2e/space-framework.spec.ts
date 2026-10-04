@@ -1,4 +1,4 @@
-import { distinctCanvasColours, expect, gotoSpace, test } from './fixtures';
+import { canvasCoverage, expect, gotoSpace, test } from './fixtures';
 
 // Spec 001 — Space framework. Console errors fail every test (see fixtures.ts).
 
@@ -7,18 +7,20 @@ test.describe('demo-cube Space (AC-9)', () => {
     await gotoSpace(page, 'demo-cube');
 
     expect(await page.evaluate(() => window.__WORLD__?.activeId())).toBe('demo-cube');
-    // Background alone would be 1 colour; a lit, textured cube gives many.
-    expect(await distinctCanvasColours(page)).toBeGreaterThan(10);
+    // The cube covers ~8 % of the frame at any rotation; background alone would be 0.
+    expect(await canvasCoverage(page)).toBeGreaterThan(0.02);
   });
 });
 
 test.describe('unknown Space (AC-8)', () => {
   test('shows "Space not found" and renders no Space', async ({ page }) => {
-    await page.goto('/?space=nope');
+    await page.goto('/#/space/nope');
 
     await expect(page.locator('body')).toHaveAttribute('data-space-status', 'not-found');
     await expect(page.getByRole('alert')).toContainText('Space not found');
     expect(await page.evaluate(() => window.__WORLD__?.activeId())).toBeNull();
+    // Guards canvasCoverage: a cleared canvas must read as (almost) empty.
+    expect(await canvasCoverage(page)).toBeLessThan(0.005);
   });
 });
 

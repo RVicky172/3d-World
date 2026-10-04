@@ -13,7 +13,8 @@ function createDeps() {
     renderer: { info: { memory: { geometries: 3, textures: 1 } } },
     instance: null as SpaceInstance | null,
   };
-  return { manager, engine } satisfies DebugDeps;
+  const router = { navigate: vi.fn<(id: string) => void>() };
+  return { manager, engine, router } satisfies DebugDeps;
 }
 
 const instanceWith = (camera: SpaceInstance['camera']): SpaceInstance => ({
@@ -51,6 +52,11 @@ describe('installDebugHook', () => {
       await target.__WORLD__?.close();
       expect(deps.manager.open).toHaveBeenCalledWith('demo-cube');
       expect(deps.manager.close).toHaveBeenCalledOnce();
+    });
+
+    it('navigate() delegates to the router, like a gallery card would (spec 002 AC-8)', () => {
+      target.__WORLD__?.navigate('demo-cube');
+      expect(deps.router.navigate).toHaveBeenCalledExactlyOnceWith('demo-cube');
     });
 
     it('activeId() reads the current id live', () => {

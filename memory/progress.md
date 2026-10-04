@@ -11,6 +11,42 @@ Newest first. One entry per working session.
 
 ---
 
+## 2026-10-04 — 002-hash-router ✔️ Implemented
+
+**Done:** Definition of Done verified: `npm run check` (173 unit), `npm run build` + bundle check (130.8 KB gz, +0.5 KB vs 001), `npm run test:e2e` (23 incl. 3 `subpath`), Prettier clean, no console errors. Coverage: routes.ts/router.ts/debug.ts 100 % lines, total 97 %. Ticked AC-1…AC-12, spec → Implemented, roadmap 002 → ✔️.
+**Next:** commit 002; `/spec-new` for 003 gallery (redefines home route).
+**Blockers:** none
+
+## 2026-10-04 — 002-hash-router (T030)
+
+**Done:** `specs/architecture.md`: HashRouter concept, routes.ts/router.ts in the layout, new Routing section (grammar, router rules, startup), seams table rows for `FakeBrowserLocation` and the `subpath` project, `navigate` in `__WORLD__`; removed `?space=` references.
+**Next:** `/spec-verify 002`.
+**Blockers:** none
+
+## 2026-10-04 — 002-hash-router (T021–T022)
+
+**Done:** `tests/e2e/router.spec.ts` — 13 tests for AC-1–6, 8–10, 12 (no-reload marker, real Back/Forward, MutationObserver re-open detector + its own positive test, spaced rapid changes). Sub-path: Playwright now runs two web servers; `subpath` project builds with `VITE_BASE=/3d-World/` into `dist-subpath/` (port 4174), `subpath.spec.ts` verifies deep link, chunk path under the base, not-found, home. Replaced the flaky colour-count check with `canvasCoverage()` (+ blank guard); 15/15 repeats stable. 173 unit + 23 E2E green.
+**Next:** T030 architecture doc, then verify.
+**Blockers:** none
+
+## 2026-10-04 — 002-hash-router (T015, T020)
+
+**Done:** Debug hook gains `navigate(id)` (router now a `DebugDeps` field). `main.ts` creates `HashRouter` (window location/history/events, `manager.open`, titles from `findSpace`, `document.title`) and calls `router.start()`; `?space=` lookup removed. E2E helpers: `gotoSpace` uses `#/space/<id>`, new `noReloadMarker()`; 001 not-found test moved to `#/space/nope`. 173 unit + 7 E2E green. NFR: entry 130.3 → 130.8 KB gz (+0.5 KB, limit +2 KB).
+**Next:** T021 router E2E, T022 sub-path E2E.
+**Blockers:** none
+
+## 2026-10-04 — 002-hash-router (T012–T014)
+
+**Done:** `FakeBrowserLocation` test helper (+7 sanity tests). `src/core/router.ts` — `HashRouter`: `start`/`navigate`/`dispose`, unknown → `replaceState` home, skip Space already showing, retry after failure, titles with sequence-guarded outcomes, `SITE_TITLE`. 22 router tests; 172 unit tests green; router.ts/routes.ts 100 % lines. T015 moved to pair with T020 (needs a router in `main.ts`).
+**Next:** T015 + T020 — wire into the app.
+**Blockers:** none
+
+## 2026-10-04 — 002-hash-router (T001, T010–T011)
+
+**Done:** Spec 002 approved (D-007), plan + tasks (13) written. T001: `dist-subpath/` ignored in git, Prettier, ESLint. T010–T011: `src/core/routes.ts` — `parseHash` / `formatRoute` / `HOME_ROUTE`; home, space (decoded, trailing slash ok, malformed encoding keeps raw id), everything else unknown; ids case-sensitive. 38 table-driven tests incl. round-trips and hostile inputs; 143 unit tests total green.
+**Next:** T012–T015 — router.
+**Blockers:** none
+
 ## 2026-10-04 — 001-space-framework (T090–T091) ✔️ Implemented
 
 **Done:** Verified Definition of Done: `npm run check` (105 unit tests), `npm run build` + bundle check (entry 130.3 KB gz, demo-cube lazy, no `__WORLD__`), `npm run test:e2e` (7 tests), Prettier clean. Coverage: lines 96.6 % total; core 93.7 %, shared/ui 100 %. Added `prefersReducedMotion` unit tests (was the only untested branch of note). Ticked AC-1…AC-11, spec → Implemented, roadmap 001 → ✔️.

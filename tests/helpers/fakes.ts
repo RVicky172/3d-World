@@ -59,3 +59,54 @@ export function createFakeContext(overrides: Partial<SpaceContext> = {}): SpaceC
     ...overrides,
   };
 }
+
+/**
+ * Browser-like `location` + `history` + `window` events for hash routing, in one object:
+ * - assigning `hash` to a new value pushes an entry and fires `hashchange` (same value: nothing),
+ *   and drops any forward entries, like a real navigation;
+ * - `replaceState(_, _, '#/x')` swaps the current entry without an event;
+ * - `back()` / `forward()` move through entries and fire `hashchange`.
+ */
+export class FakeBrowserLocation extends EventTarget {
+  entries: string[];
+  index = 0;
+
+  constructor(initialHash = '') {
+    super();
+    this.entries = [normaliseHash(initialHash)];
+  }
+
+  get hash(): string {
+    return this.entries[this.index] ?? '';
+  }
+
+  set hash(value: string) {
+    const next = normaliseHash(value);
+    if (next === this.hash) return;
+    this.entries = [...this.entries.slice(0, this.index + 1), next];
+    this.index = this.entries.length - 1;
+    this.dispatchEvent(new Event('hashchange'));
+  }
+
+  replaceState(_data: unknown, _unused: string, url?: string | URL | null): void {
+    if (url != null) this.entries[this.index] = normaliseHash(String(url));
+  }
+
+  back(): void {
+    if (this.index === 0) return;
+    this.index--;
+    this.dispatchEvent(new Event('hashchange'));
+  }
+
+  forward(): void {
+    if (this.index === this.entries.length - 1) return;
+    this.index++;
+    this.dispatchEvent(new Event('hashchange'));
+  }
+}
+
+/** `location.hash` reads back as "" for an empty fragment and "#…" otherwise. */
+function normaliseHash(value: string): string {
+  const fragment = value.startsWith('#') ? value.slice(1) : value;
+  return fragment === '' ? '' : `#${fragment}`;
+}

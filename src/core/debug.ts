@@ -5,6 +5,8 @@ import type { OpenResult, RendererLike, SpaceInstance } from './types';
 export interface WorldDebugApi {
   open(id: string): Promise<OpenResult>;
   close(): Promise<void>;
+  /** Navigate like a gallery card would: updates the URL, adds a history entry (spec 002). */
+  navigate(id: string): void;
   activeId(): string | null;
   /** Snapshot of GPU resource counts (AC-4). */
   memory(): { geometries: number; textures: number };
@@ -22,6 +24,7 @@ export interface DebugDeps {
     readonly renderer: { readonly info: RendererLike['info'] };
     readonly instance: SpaceInstance | null;
   };
+  router: { navigate(id: string): void };
 }
 
 export interface DebugTarget {
@@ -38,12 +41,17 @@ declare global {
  * Installs `__WORLD__` unless `mode` is production. Call it behind a literal
  * `import.meta.env.MODE !== 'production'` check so production bundles drop this module entirely.
  */
-export function installDebugHook(target: DebugTarget, { manager, engine }: DebugDeps, mode: string): boolean {
+export function installDebugHook(
+  target: DebugTarget,
+  { manager, engine, router }: DebugDeps,
+  mode: string,
+): boolean {
   if (mode === 'production') return false;
 
   target.__WORLD__ = {
     open: (id) => manager.open(id),
     close: () => manager.close(),
+    navigate: (id) => router.navigate(id),
     activeId: () => manager.activeId,
     memory: () => ({ ...engine.renderer.info.memory }),
     cameraAspect: () => {

@@ -24,7 +24,7 @@ _Goal: one renderer that can load, switch, and dispose Spaces; a gallery to pick
 | #   | Feature                                                                          | Spec                           | Status |
 | --- | -------------------------------------------------------------------------------- | ------------------------------ | ------ |
 | 001 | Space framework: `Space` contract, `SpaceManager`, render loop, resize, disposal | `features/001-space-framework` | ✔️     |
-| 002 | Hash router & deep links (`#/`, `#/space/<id>`)                                  | —                              | ⬜     |
+| 002 | Hash router & deep links (`#/`, `#/space/<id>`)                                  | `features/002-hash-router`     | ✔️     |
 | 003 | Gallery page: cards for each registered Space, lazy loading                      | —                              | ⬜     |
 | 004 | Shared camera controls (orbit/zoom/pan; mouse, touch, keyboard)                  | —                              | ⬜     |
 | 005 | WebGL capability check + fallback screen, reduced-motion support                 | —                              | ⬜     |
