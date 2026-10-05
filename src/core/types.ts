@@ -50,6 +50,8 @@ export interface SpaceInstance {
   focusTarget?(context: { previousSpaceId: string | null }): HTMLElement | null;
   /** World positions of the Space's hotspots, in data order (test seam, spec 012 AC-6). */
   hotspotPositions?(): Array<{ id: string; world: [number, number, number] }>;
+  /** Bodies' world positions and drawn radii, in scene units (test seam, spec 020). */
+  bodies?(): Array<{ id: string; world: [number, number, number]; radius: number }>;
   /** Free everything: geometries, materials, textures, listeners, DOM. */
   dispose(): void;
 }

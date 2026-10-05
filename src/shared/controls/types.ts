@@ -15,6 +15,8 @@ export interface CameraControlsConfig {
   /** `speed` is OrbitControls' autoRotateSpeed (2 ≈ 30 s per turn); `idleDelay` in seconds. */
   turntable: { speed: number; idleDelay: number };
   keyboard?: KeySteps;
+  /** OrbitControls' wheel/pinch zoom speed (default 1). Spec 020 raises it for the real-scale solar system. */
+  zoomSpeed?: number;
 }
 
 /** Keyboard step sizes: radians per orbit step, distance factor per zoom-in, world units per pan step. */
@@ -66,5 +68,12 @@ export interface CameraControls {
   turnTo(direction: Vec3, options?: { duration?: number }): void;
   /** Keeps the idle turntable still (e.g. while an annotation is open); release restarts its idle delay. */
   holdTurntable(hold: boolean): void;
+  /**
+   * Moves the orbit target to `point` and keeps the camera where it is, so the view turns to it (spec 020,
+   * D-023: a real-scale zoom that starts on a body re-centres on it). Instant; counts as an interaction;
+   * `reset()` returns home. The pan, distance and angle limits still apply; `minDistance` replaces the home
+   * view's closest distance (e.g. just outside the body focused on) until `reset()`.
+   */
+  focusOn(point: Vec3, options?: { minDistance?: number }): void;
   dispose(): void;
 }

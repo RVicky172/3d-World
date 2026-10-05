@@ -8,6 +8,13 @@ describe('space registry', () => {
     expect(spaces.map((s) => s.id)).toContain('demo-cube');
   });
 
+  it('lists the Solar System as a multi-object Space (spec 020, AC-9)', () => {
+    const solar = findSpace('solar-system');
+    expect(solar?.title).toBe('Solar System');
+    expect(solar?.kind).toBe('multi');
+    expect(solar?.description).toMatch(/true to scale/);
+  });
+
   it('uses unique ids', () => {
     const ids = spaces.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);

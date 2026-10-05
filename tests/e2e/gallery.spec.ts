@@ -27,7 +27,7 @@ test('AC-1: the home route shows the gallery with one card per registered Space'
   const hrefs = await page
     .locator('.gallery a.card')
     .evaluateAll((links) => links.map((a) => a.getAttribute('href')));
-  expect(hrefs).toEqual(['#/space/sheen-chair', '#/space/demo-cube']); // registry order
+  expect(hrefs).toEqual(['#/space/solar-system', '#/space/sheen-chair', '#/space/demo-cube']); // registry order
 });
 
 test('AC-2: a card shows title, description and kind', async ({ page }) => {
@@ -60,7 +60,8 @@ test('AC-4: clicking a card opens the Space with one history entry; Back returns
 
 test('AC-4: the keyboard opens a card with Enter', async ({ page }) => {
   await gotoGallery(page);
-  await page.keyboard.press('Tab'); // first card: Sheen Chair
+  await page.keyboard.press('Tab'); // first card: Solar System
+  await page.keyboard.press('Tab'); // Sheen Chair
   await page.keyboard.press('Tab');
   await expect(card(page)).toBeFocused();
   await page.keyboard.press('Enter');
@@ -150,7 +151,8 @@ test('AC-9: heading, list, named links, visible focus, sensible tab order', asyn
   await expect(page.getByRole('heading', { level: 1, name: '3D World' })).toBeVisible();
   const list = page.getByRole('list');
   await expect(list).toHaveCount(1);
-  await expect(list.getByRole('listitem')).toHaveCount(2);
+  await expect(list.getByRole('listitem')).toHaveCount(3);
+  await expect(list.getByRole('listitem').getByRole('link', { name: /Solar System/ })).toHaveCount(1);
   await expect(list.getByRole('listitem').getByRole('link', { name: /Demo Cube/ })).toHaveCount(1);
   await expect(list.getByRole('listitem').getByRole('link', { name: /Sheen Chair/ })).toHaveCount(1);
 

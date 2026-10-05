@@ -110,3 +110,18 @@ function normaliseHash(value: string): string {
   const fragment = value.startsWith('#') ? value.slice(1) : value;
   return fragment === '' ? '' : `#${fragment}`;
 }
+
+/** A Storage backed by a Map, so tests don't share the jsdom localStorage. */
+export function memoryStorage(): Storage {
+  const map = new Map<string, string>();
+  return {
+    get length() {
+      return map.size;
+    },
+    clear: () => map.clear(),
+    getItem: (key) => map.get(key) ?? null,
+    key: (index) => [...map.keys()][index] ?? null,
+    removeItem: (key) => void map.delete(key),
+    setItem: (key, value) => void map.set(key, String(value)),
+  };
+}

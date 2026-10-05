@@ -721,3 +721,88 @@ body[data-view='gallery'] .back-to-gallery {
   outline: 3px solid var(--accent);
   outline-offset: 2px;
 }
+
+/*
+ * Solar system (spec 020). The scale toggle sits on the controls row, bottom-left (this Space has no model
+ * credit). Real-scale name markers are labels only: they let every pointer event through to the 3D view.
+ */
+.scale {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+}
+
+.scale-toggle {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.scale-toggle:hover {
+  border-color: var(--accent);
+}
+
+.scale-toggle[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--surface-inset);
+}
+
+.scale-toggle:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.body-markers {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.body-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* The label sits just right of the body; the dot is centred on it. */
+  padding-left: 10px;
+  color: var(--fg);
+  font-size: 0.8rem;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  translate: -3px -0.5em;
+  text-shadow: 0 0 3px var(--bg);
+}
+
+.body-marker-dot {
+  position: absolute;
+  top: calc(0.5em - 3px);
+  left: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.body-marker[hidden] {
+  display: none;
+}
+
+/* Near the right edge the name sits left of its dot (D-024). */
+.body-marker.is-left {
+  padding-right: 10px;
+  padding-left: 0;
+  translate: calc(-100% + 3px) -0.5em;
+}
+
+.body-marker.is-left .body-marker-dot {
+  right: 0;
+  left: auto;
+}

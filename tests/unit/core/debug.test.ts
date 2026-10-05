@@ -122,6 +122,17 @@ describe('installDebugHook', () => {
       expect(target.__WORLD__?.hotspots()).toEqual([{ id: 'seat', world: [1, 2, 3] }]);
     });
 
+    it('bodies() reports the active Space’s bodies, else an empty list (spec 020)', () => {
+      expect(target.__WORLD__?.bodies()).toEqual([]);
+      deps.engine.instance = instanceWith(new PerspectiveCamera());
+      expect(target.__WORLD__?.bodies()).toEqual([]);
+      deps.engine.instance = {
+        ...instanceWith(new PerspectiveCamera()),
+        bodies: () => [{ id: 'earth', world: [1, 0, 0], radius: 0.5 }],
+      };
+      expect(target.__WORLD__?.bodies()).toEqual([{ id: 'earth', world: [1, 0, 0], radius: 0.5 }]);
+    });
+
     it('cameraProjection() reports the perspective camera’s fov, aspect, near and far, else null (spec 012)', () => {
       expect(target.__WORLD__?.cameraProjection()).toBeNull();
       deps.engine.instance = instanceWith(new PerspectiveCamera(40, 1.5, 0.01, 300));

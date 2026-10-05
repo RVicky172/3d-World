@@ -19,7 +19,7 @@ describe('createCameraControls', () => {
   let space: AbortController;
   let controls: CameraControls;
 
-  const create = (reducedMotion = false) => {
+  const create = (reducedMotion = false, config: CameraControlsConfig = CONFIG) => {
     controls = createCameraControls({
       camera,
       canvas,
@@ -28,7 +28,7 @@ describe('createCameraControls', () => {
       reducedMotion,
       coarsePointer: false,
       label: 'Demo Cube',
-      config: CONFIG,
+      config,
     });
     return controls;
   };
@@ -366,6 +366,77 @@ describe('createCameraControls', () => {
       expect(controls.turntableActive).toBe(false);
       frames(60 * 1.1);
       expect(controls.turntableActive).toBe(true);
+    });
+  });
+
+  describe('focusOn() and zoomSpeed (spec 020, D-023)', () => {
+    it('focusOn() moves the orbit target to the point and keeps the camera where it is', () => {
+      create(true);
+      const before = camera.position.clone();
+      controls.focusOn([0.5, 0, 0]);
+      expectAt(controls.target, [0.5, 0, 0]);
+      expect(camera.position.distanceTo(before)).toBeLessThan(1e-9);
+      // The view turns to it.
+      const looking = new Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const toPoint = new Vector3(0.5, 0, 0).sub(camera.position).normalize();
+      expect(looking.angleTo(toPoint)).toBeLessThan(1e-6);
+    });
+
+    it('orbiting and zooming then happen around the new target', () => {
+      create(true);
+      controls.focusOn([0.5, 0, 0]);
+      const before = camera.position.distanceTo(controls.target);
+      press('ArrowLeft');
+      expect(camera.position.distanceTo(controls.target)).toBeCloseTo(before, 6); // orbit keeps the distance
+      wheel(-100);
+      controls.update(1 / 60);
+      expect(camera.position.distanceTo(controls.target)).toBeLessThan(before);
+    });
+
+    it('counts as an interaction: the turntable waits its idle delay; reset() returns home', () => {
+      create(false);
+      frames(10); // the turntable is running
+      controls.focusOn([0.5, 0, 0]);
+      expect(controls.userMoved).toBe(true);
+      frames(60); // 1 s, inside the 4 s idle delay
+      expect(controls.turntableActive).toBe(false);
+      controls.reset();
+      expectAt(controls.target, [0, 0, 0]);
+      expectAt(camera.position, [0, 0, 4]);
+    });
+
+    it('focusOn(point, { minDistance }) keeps the camera that far from the point until reset()', () => {
+      create(true);
+      controls.focusOn([0.5, 0, 0], { minDistance: 1 });
+      for (let i = 0; i < 40; i++) {
+        wheel(-500);
+        controls.update(1 / 60);
+      }
+      expect(camera.position.distanceTo(controls.target)).toBeGreaterThanOrEqual(1 - 1e-9);
+      expect(camera.position.distanceTo(controls.target)).toBeLessThan(1.1); // it did zoom in, down to the limit
+
+      controls.reset(); // back to the home limits (CONFIG: min 2)
+      for (let i = 0; i < 40; i++) {
+        wheel(-500);
+        controls.update(1 / 60);
+      }
+      expect(distance()).toBeGreaterThanOrEqual(2 - 1e-9);
+    });
+
+    it('zoomSpeed scales each wheel step (default 1)', () => {
+      const zoomedBy = (zoomSpeed?: number) => {
+        controls?.dispose();
+        camera = new PerspectiveCamera(50, 1, 0.1, 100);
+        create(true, zoomSpeed === undefined ? CONFIG : { ...CONFIG, zoomSpeed });
+        const start = distance();
+        wheel(-100);
+        controls.update(1 / 60);
+        return distance() / start;
+      };
+      const normal = zoomedBy();
+      const fast = zoomedBy(4);
+      expect(normal).toBeLessThan(1);
+      expect(Math.log(fast) / Math.log(normal)).toBeCloseTo(4, 1);
     });
   });
 

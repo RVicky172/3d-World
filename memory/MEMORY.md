@@ -4,14 +4,14 @@
 
 ## Current State (2026-10-05)
 
-- **Phase:** 2 (Single-Object Showcase) **complete: 010 ✔️, 011 ✔️, 012 ✔️**. Phase 3 (Solar System, 020–023) is next on the roadmap.
-- **Active feature:** none. 012 is **Implemented** but **not yet committed** (all work is in the working tree).
-- **Last done:** **012-info-panel is Implemented** (2026-10-05):
-  - 17 ACs verified; 560 unit + 129 E2E (~1.1 min at 4 workers); entry 146.0 KB (+0.4 KB of the 3 KB cap); chair 1.87 MB.
-  - Info panel in every Space (core; registry strings; collapse remembered in `localStorage`; side panel / bottom sheet).
-  - Hotspots (`src/shared/hotspots/`): markers within 4 px, dimmed when hidden (own any-hit occlusion, D-021), annotation turns the camera (`turnTo`) and pauses the turntable (`holdTurntable`). Chair: seat, frame, legs, label.
-  - Decisions D-020 (choices), D-021 (copy after the probe, occlusion test). Architecture doc updated.
-- **Next step:** commit 012 when the lead asks (`feat(012): info panel and hotspots`), then `/spec-new 020`. Open question to the lead: the chair's registry description says "armchair" but it has no arms.
+- **Phase:** 3 (Solar System, 020–023): **020 ✔️**; 021 (orbital mechanics, time controls) is next on the roadmap.
+- **Active feature:** none. 020 is **Implemented** but **not yet committed** (all work is in the working tree; 012 was committed as `dbd4882`, not pushed).
+- **Last done:** **020-solar-system-data is Implemented** (2026-10-05):
+  - 14 ACs verified; 652 unit + 145 E2E; entry 146.5 KB (+0.5 KB of the 3 KB cap); Space 12.7 KB.
+  - 16 bodies from JPL with sources (NSSDC was unreachable); stylised (packed rings, exponent 0.25) and real (10⁶ km/unit) scales; one shared sphere, pivot groups ready for 021; dynamic near plane.
+  - Real scale: name markers with moon rule + declutter (D-024); a zoom starting on a body re-centres on it (D-023: controls `focusOn(point, { minDistance })`, `zoomSpeed`).
+  - Decisions D-022 (choices), D-023 (+ addendum), D-024. Chair description now "velvet lounge chair".
+- **Next step:** commit 020 when the lead asks (`feat(020): solar system data and scale modes`), then `/spec-new 021`.
 - **Blockers:** none
 
 ## Files

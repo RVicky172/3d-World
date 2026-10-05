@@ -40,6 +40,7 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
   orbit.maxPolarAngle = config.polar.max;
   orbit.enableDamping = !reducedMotion;
   orbit.dampingFactor = DAMPING;
+  orbit.zoomSpeed = config.zoomSpeed ?? 1;
   orbit.autoRotateSpeed = config.turntable.speed;
   orbit.update();
   orbit.saveState();
@@ -58,6 +59,9 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
   } | null = null;
 
   let userMoved = false;
+  /** The home view's closest distance; a `focusOn()` may set its own until `reset()`. */
+  let homeMinDistance = config.distance.min;
+  let focusMinDistance: number | null = null;
   const interact = () => {
     userMoved = true;
     turn = null; // the visitor takes over
@@ -71,6 +75,8 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
 
   function reset() {
     interact();
+    focusMinDistance = null;
+    orbit.minDistance = homeMinDistance;
     // Flush in-flight damping first: OrbitControls.reset() calls update(), which would otherwise
     // apply leftover velocity and drift away from the saved view.
     const damping = orbit.enableDamping;
@@ -82,7 +88,8 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
   }
 
   function setHome(home: ControlsHome) {
-    orbit.minDistance = home.distance.min;
+    homeMinDistance = home.distance.min;
+    orbit.minDistance = focusMinDistance ?? homeMinDistance;
     orbit.maxDistance = home.distance.max;
     orbit.maxTargetRadius = home.panLimit;
     // The state reset() returns to (what saveState() would store, without moving the camera).
@@ -140,6 +147,15 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
     }
     const from = camera.position.clone().sub(orbit.target).normalize();
     turn = { from, to, fromTarget: orbit.target.clone(), distance, elapsed: 0, duration };
+  }
+
+  function focusOn(point: readonly [number, number, number], { minDistance }: { minDistance?: number } = {}) {
+    settle();
+    interact();
+    focusMinDistance = minDistance ?? null;
+    orbit.minDistance = focusMinDistance ?? homeMinDistance;
+    orbit.target.set(...point);
+    settle(); // re-derives the view from where the camera is, within the limits
   }
 
   /** Advances a turn in progress by `delta` seconds; clears it at the end. */
@@ -209,6 +225,7 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
     },
     setHome,
     turnTo,
+    focusOn,
     holdTurntable(hold) {
       turntable.hold(hold);
       if (hold) orbit.autoRotate = false;

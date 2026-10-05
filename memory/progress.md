@@ -11,6 +11,40 @@ Newest first. One entry per working session.
 
 ---
 
+## 2026-10-05 — 020-solar-system-data ✔️ Implemented
+
+**Done:**
+
+- 012 committed (`dbd4882`). 020 spec drafted; Q1–Q6 answered (D-022: spread fixed angles, 7 moons ≥ 1 000 km, stylised default remembered, full J2000 data, real-scale name markers, entry ≤ 3 KB). Plan and 19 tasks.
+- T001 spike: OrbitControls' `zoomToCursor` can't reach a body at real scale (stalls at the target's depth); re-centring the orbit on the body under the pointer reaches Earth in 58 steps. Real-scale rendering clean (separate meshes, dynamic near/far). Entry +0.4 KB. Lead chose re-centring (D-023: `focusOn` + `zoomSpeed` 4).
+- T010–T011: data for 16 bodies from JPL (Horizons API, phys_par, approx_pos, sats/elem; NSSDC unreachable), approved by the lead; Kepler residuals ≤ 0.75 %; IAU spin convention (tilt > 90° = backwards). CREDITS gains a Data section.
+- T012–T013: `scale.ts` (real 1 unit = 10⁶ km; stylised packed rings). Constants retuned to exponent 0.25 / log 1.5 after the perspective-correct visibility test (3.33 px at 1280 × 720).
+- T020–T021: `scene.ts`: system → Sun + decay-0 point light + faint ambient; planet orbit groups → mesh + moon orbit groups (moons don't inherit planet scale); one shared sphere; `applyLayout` moves/rescales only. Caught an unknown-parent fall-through with a new test.
+- T022: controls `focusOn(point)` (target moves, camera stays, an interaction, reset returns home) and `zoomSpeed` config. 609 unit + 129 E2E green.
+
+- T023: `scale-toggle.ts`: "True scale" button with `aria-pressed`; a polite visually hidden description that the canvas's `aria-describedby` points at; `set()` for restores.
+- T024: `markers.ts`: real-scale name labels (`aria-hidden`, pointer-events none), read-then-write-on-change, a moon hidden within 24 px of its planet, `nearest(x, y, r)` for re-centring; a real dot element so E2E can measure it. CSS for both. 626 unit green.
+
+- T025–T026: `index.ts` (`createSolarSystem`): remembered scale (`world.solarSystem.scale`), toggle + markers before the controls, switch re-homes instantly, real-scale re-centring on wheel (capture phase) and pinch start via `markers.nearest()`, near plane at half the nearest surface (clamped 1e-6–1, 10 % hysteresis), far past the system, `bodies()` seam. A unit test caught the camera entering Earth/the Sun (min zoom was 3 × smallest radius) → `focusOn(point, { minDistance })`, 1.2 × the orbited body's radius (D-023 addendum). `memoryStorage()` moved to `tests/helpers/fakes.ts`. 643 unit + 129 E2E green.
+
+- T027: `solar-system` registered (first card); `__WORLD__.bodies()`. Four gallery/controls E2E tests pinned the two-card order/Tab count and were updated. Screenshots at 1280/375/320 in both scales: clean, no overlap, no console errors; cosmetic issue raised (inner-planet labels overprint at real-scale home; Neptune clipped at 320). Entry 146.5 KB (+0.5); Space 12.3 KB. 647 unit + 129 E2E green.
+
+- Chair wording fixed at the lead's request: registry description "velvet armchair" → "velvet lounge chair" (the model has no arms, found in 012 T040); the two E2E card checks and a unit fixture updated.
+
+- T030: `solar-system.spec.ts`, 8 tests (AC-5, AC-7, AC-8, AC-9). Sabotage-checked; the re-frame test now moves the camera first (learnings). 647 unit + 137 E2E green.
+
+- Label declutter (D-024, lead's choice): the larger body keeps its name, names stay in view; names are measured once per show/resize after a real-browser check disproved the estimate. AC-8a amended.
+- T031: 6 E2E (markers, declutter, zoom to Earth, touch re-centre, lighting, still bodies). 652 unit + 143 E2E green.
+
+- T032: round trips (DOM + GPU memory back to baseline; sabotage-checked) and context loss keeps real scale. 652 unit + 145 E2E green.
+
+- T090: architecture: a Solar System section (data, scales, scene graph, precision, re-centring zoom, markers, toggle, Tab order), controls `focusOn`/`zoomSpeed`, seams; the planned section narrowed to 021–023.
+- T091: full gate green; entry 146.5 KB; Space 12.7 KB; gate-5 probe clean; 60.3 fps in SwiftShader (software floor; logged the renderer string).
+- T092: all 14 ACs ticked; spec Implemented; roadmap 020 ✔️.
+
+**Next:** commit 020 when asked; then `/spec-new 021`.
+**Blockers:** none
+
 ## 2026-10-05 — 012-info-panel ✔️ Implemented
 
 **Done:**

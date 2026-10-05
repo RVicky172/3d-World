@@ -1,23 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { readPreference, writePreference } from '../../../src/core/preferences';
+import { memoryStorage } from '../../helpers/fakes';
 
 // Spec 012, AC-1 (D-020): the info panel's open/collapsed choice is remembered in localStorage. Storage can be
 // missing, blocked or throwing (private mode), so preferences never throw and fall back instead.
-
-/** A Storage backed by a Map, so tests don't share the jsdom localStorage. */
-function memoryStorage(): Storage {
-  const map = new Map<string, string>();
-  return {
-    get length() {
-      return map.size;
-    },
-    clear: () => map.clear(),
-    getItem: (key) => map.get(key) ?? null,
-    key: (index) => [...map.keys()][index] ?? null,
-    removeItem: (key) => void map.delete(key),
-    setItem: (key, value) => void map.set(key, String(value)),
-  };
-}
 
 const throwingStorage = (): Storage =>
   ({

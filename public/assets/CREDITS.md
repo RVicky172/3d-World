@@ -16,3 +16,11 @@ bundled into the Space's lazy chunk.
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------- | ---------- |
 | Basis Universal transcoder (`basis_transcoder.js`, `.wasm`) | [BinomialLLC/basis_universal](https://github.com/BinomialLLC/basis_universal) | Binomial LLC      | Apache-2.0 |
 | Meshopt decoder (`meshopt_decoder.module.js`)               | [zeux/meshoptimizer](https://github.com/zeux/meshoptimizer)                   | Arseny Kapoulkine | MIT        |
+
+## Data
+
+Numbers bundled with the site's code (no files, nothing fetched at runtime), listed for provenance.
+
+| Data                                                                                             | Used by                           | Source                                                                                                                                                                                                                                                                                        | Author   | License       |
+| ------------------------------------------------------------------------------------------------ | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------- |
+| Sun, planets and major moons: radii, GM, rotation, obliquity, orbital elements (read 2026-10-05) | `src/spaces/solar-system/data.ts` | [JPL Horizons](https://ssd.jpl.nasa.gov/horizons/), [planetary physical parameters](https://ssd.jpl.nasa.gov/planets/phys_par.html), [approximate planet positions](https://ssd.jpl.nasa.gov/planets/approx_pos.html), [satellite mean elements](https://ssd.jpl.nasa.gov/sats/elem/sep.html) | NASA/JPL | Public domain |

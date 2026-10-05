@@ -3,7 +3,7 @@ import { createInfoPanel } from '../../../src/ui/info-panel';
 
 // Spec 012: every Space shows its title and description (AC-1) in a collapsible, accessible panel (AC-2, AC-4).
 
-const INFO = { title: 'Sheen Chair', description: 'A velvet armchair to turn, zoom and inspect.' };
+const INFO = { title: 'Sheen Chair', description: 'A velvet lounge chair to turn, zoom and inspect.' };
 
 describe('createInfoPanel', () => {
   let overlay: HTMLElement;

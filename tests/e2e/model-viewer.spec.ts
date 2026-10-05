@@ -54,7 +54,7 @@ test.describe('showing the model', () => {
     await expect(body(page)).toHaveAttribute('data-space-ready', 'true');
     const card = page.locator(`a.card[href="#/space/${ID}"]`);
     await expect(card.getByRole('heading', { level: 2 })).toHaveText('Sheen Chair');
-    await expect(card).toContainText('velvet armchair');
+    await expect(card).toContainText('velvet lounge chair');
     await expect(card.locator('.card-placeholder')).toBeVisible();
 
     await card.click();
@@ -203,7 +203,7 @@ test.describe('exploring the model', () => {
     await expect(body(page)).toHaveAttribute('data-space-ready', 'true');
     const card = page.getByRole('link', { name: /Sheen Chair/ });
     await expect(card).toContainText('Sheen Chair');
-    await expect(card).toContainText('A velvet armchair to turn, zoom and inspect');
+    await expect(card).toContainText('A velvet lounge chair to turn, zoom and inspect');
 
     await card.click();
     await expect(body(page)).toHaveAttribute('data-space-ready', 'true');

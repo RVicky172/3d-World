@@ -187,3 +187,33 @@ Format:
 
 **Alternatives:** For the copy, user-written wording. For occlusion, `three-mesh-bvh` (a new runtime dependency); or keeping `Raycaster` and relaxing the NFR.
 **Consequences:** About 60 lines of geometry code in `src/shared/hotspots/occlusion.ts` with unit tests. 1.4 MB of CPU memory per chair visit, freed on dispose. The copy relies on the model holding still (D-009); a moving model would need the copy rebuilt.
+
+## D-022 — Solar system data and scale choices for 020 (2026-10-05)
+
+**Context:** Spec 020 open questions Q1–Q6.
+**Decision (project lead):**
+
+1. Until 021 adds motion, each body sits at a fixed, data-defined angle on its orbit, spread out.
+2. Moons: the seven with radius ≥ 1 000 km (the Moon, Io, Europa, Ganymede, Callisto, Titan, Triton).
+3. The Space opens in **stylised** scale; the visitor's choice is remembered in `localStorage`.
+4. The data carries the full orbital elements now (planets: J2000 elements), so 021 only adds the maths.
+5. Real scale keeps the spheres exactly to scale and adds **name markers** over the bodies' true positions.
+6. The entry-growth cap is **≤ 3 KB gzipped**, fixed.
+
+**Alternatives:** Bodies lined up, or real positions for a date; adding Phobos and Deimos, or ~15 moons; not remembering the scale, or putting it in the URL; only the data 020 displays; a minimum on-screen size, or no help at real scale; a 5 KB cap, or the total budget only.
+**Consequences:** 020 reuses 012's preference store and screen projection. Real scale needs care with depth and float precision (distances span ~10⁵). Markers are labels only; 023 adds selection.
+
+## D-023 — Real-scale zoom re-centres on the body under the pointer (020, 2026-10-05)
+
+**Context:** The 020 plan used OrbitControls' `zoomToCursor` so wheel and pinch could zoom from the whole real-scale system to a planet (AC-8a). The T001 spike showed it can't: each step moves the camera by a fraction of its distance to the orbit target, so it stalls at the target's depth (400 steps left Earth at 0.1 px). Re-targeting the orbit onto the body first reached Earth at 3 px in 58 steps, with clean rendering.
+**Decision (project lead):** At real scale, a wheel or pinch zoom that starts within 24 px of a body's projected centre re-centres the orbit on that body (new additive controls method `focusOn(point)`: target moves, camera stays, instant), then zooms normally. This Space sets the new additive `zoomSpeed` config to 4 (about 40 wheel notches from the whole system to Earth at 3 px).
+**Alternatives:** Bring forward 023's click-to-fly (markers as buttons); drop "zooming in reveals them" from AC-8a.
+**Consequences:** Two additive controls APIs (`focusOn`, `zoomSpeed`). The Space listens to `wheel` in the capture phase and to pinch starts on the canvas. Re-centring turns the view instantly; an eased version can come with 023's flying.
+**Addendum (2026-10-05, T025):** The plan's zoom limit, 3 × the smallest body radius in the scale, let the camera fly inside Earth and the Sun (a unit test caught it: the nearest surface came out negative). The limit now follows the body being orbited: 1.2 × its radius (as 010). `focusOn(point, { minDistance })` sets it on a re-centre, `reset()` restores the home limit (1.2 × the Sun's radius), and a resize while focused keeps the focus limit. Additive; no spec change.
+
+## D-024 — Real-scale labels declutter (020, 2026-10-05)
+
+**Context:** The 020 T027 screenshots showed the Sun's and the four inner planets' names overprinting into an unreadable cluster at the real-scale home view (all within ~15 px), and "Neptune" clipped at the edge of a 320 px phone. AC-8a only kept moons apart from their planet.
+**Decision (project lead):** Where two names would overlap, the larger body keeps its name and the other shows only its dot (its name returns once there's room, e.g. after zooming in). A name that would run past the view's right edge sits left of its dot. The moon rule (hidden within 24 px of its planet) stays.
+**Alternatives:** Leave it for 023, which reworks labels with selection.
+**Consequences:** `markers.ts` gets a greedy pass by body size over estimated label boxes (from name length; no layout reads per frame). AC-8a amended (spec Changelog).

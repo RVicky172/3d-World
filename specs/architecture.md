@@ -78,6 +78,14 @@ src/
     <space-id>/
       index.ts            # default-exports a SpaceFactory; scene data as a typed config object
       data.ts             # typed scene data (e.g. sheen-chair: ModelViewerConfig, incl. hotspots)
+    solar-system/         # 020: the multi-object Space
+      data.ts             # BODIES (16, from JPL), SOURCES, REAL_UNIT_KM, STYLISED constants, SOLAR_SYSTEM view
+      types.ts            # BodyData, OrbitalElements, ScaleMode, BodyLayout, DataSource
+      scale.ts            # pure: layout(bodies, mode), placeBodies(), worldPositions(), systemExtent()
+      scene.ts            # buildSystem(): pivot groups + one shared sphere + Sun light; applyLayout()
+      markers.ts          # createBodyMarkers(): real-scale name labels, moon rule, declutter, nearest()
+      scale-toggle.ts     # createScaleToggle(): "True scale" button + polite scale description
+      index.ts            # createSolarSystem(): ties them together; re-centring zoom; dynamic near/far
   styles/main.css         # tokens; stacking: canvas → .overlay → .fader → .loading / .context-lost → .back-to-gallery
 scripts/
   bundle-checks.mjs       # pure bundle rules (unit-tested): entry budget, per-Space 5 MB (code + assets + emitted decoders)
@@ -123,6 +131,7 @@ export interface SpaceInstance {
   render?(): void; // opt-in custom rendering (e.g. EffectComposer)
   focusTarget?(context: { previousSpaceId: string | null }): HTMLElement | null; // where focus lands on a switch (004 AC-13)
   hotspotPositions?(): Array<{ id: string; world: [number, number, number] }>; // test seam (012 AC-6)
+  bodies?(): Array<{ id: string; world: [number, number, number]; radius: number }>; // test seam (020)
   dispose(): void; // free GPU + DOM + listeners
 }
 
@@ -343,6 +352,10 @@ label, config })` in its factory. It calls `controls.update(delta)` from `update
   `reset()`, and it sets `userMoved`. It counts as an interaction, so the turntable's idle delay restarts.
 - **`holdTurntable(hold)` (012, AC-12):** keeps the turntable idle while held (an open annotation); releasing
   restarts the idle delay.
+- **`focusOn(point, { minDistance? })` (020, D-023):** moves the orbit target to `point` and keeps the camera
+  where it is, so the view turns to it. Instant; counts as an interaction. `minDistance` replaces the home view's
+  closest distance until `reset()`, which restores it; a resize while focused keeps the focus limit.
+- **`zoomSpeed` config (020):** OrbitControls' wheel/pinch zoom speed (default 1).
 - **Reset:** flush in-flight damping (one `update()` with damping off), then `OrbitControls.reset()` to the saved
   initial state. Without the flush, the reset drifts.
 - **UI (`ctx.overlay`):**
@@ -542,15 +555,66 @@ composers.
 | Preferences (unit)            | `window.localStorage`                                      | an injected `Storage` (incl. one that throws)                                                |
 | Marker placement (E2E)        | the hotspot module's own projection                        | `__WORLD__.hotspots()` + `cameraPose()` + `cameraProjection()`, projected with three in Node |
 | Hotspot controls (unit)       | `turnTo` / `holdTurntable` of the shared controls          | `vi.fn()` controls; real camera and three meshes for occlusion                               |
+| Solar system bodies (E2E)     | the Space's own drawing and markers                        | `__WORLD__.bodies()` + `cameraPose()` + `cameraProjection()`, projected with three in Node   |
+| Scale preference (unit)       | `window.localStorage`                                      | `memoryStorage()` (`tests/helpers/fakes.ts`) via `SolarSystemDeps.storage`                   |
+| Pointer events (unit)         | `PointerEvent`, pointer capture                            | `MouseEvent` with `pointerId`/`pointerType` defined; stubbed `setPointerCapture` (jsdom)     |
+| Touch re-centring (E2E)       | fingers landing on a marker                                | `touchGesture(page, fingers, 0)`: touch start and end, no moves                              |
 
 `window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory`, `cameraAspect`, `cameraPose`, and
 `loseContext` / `restoreContext` (three's `forceContextLoss/Restore`; restore only after `data-webgl="lost"`). It is installed behind a
 literal `import.meta.env.MODE !== 'production'` check, so production bundles drop it. `npm run build` verifies this.
 
-## Multi-Object Pattern (Solar System, planned — features 020–023)
+## Solar System (`src/spaces/solar-system/`, 020)
 
-- The scene graph uses **pivots**: `Sun → orbitPivot(planet) → planetMesh → orbitPivot(moon) → moonMesh`.
-- Positions come from pure functions in `orbit.ts`: `positionAt(orbitalElements, t)` returns a Vector3-like value.
-  They are unit-tested without WebGL.
-- `data.ts` holds each body's radius, distance, period, tilt and texture path. A `scaleMode` setting maps real values
-  to display values.
+The first multi-object Space: the Sun, eight planets and the seven moons ≥ 1 000 km (D-022), stylised or true to
+scale. 021 adds motion, 022 surfaces, 023 selection and facts.
+
+- **Data (`data.ts`):** 16 `BodyData` records copied from JPL (Horizons physical data, planetary physical
+  parameters, J2000 approximate elements, satellite mean elements; NSSDC was unreachable), each with its source
+  listed in `SOURCES` and `CREDITS.md`. Planets carry full J2000 elements and moons their mean elements, so 021
+  only adds maths. Rotation periods are positive; a tilt over 90° means a backwards spin (IAU). A unit test checks
+  every orbit against Kepler's third law (all within 0.75 %). Each body has a fixed `displayAngleDeg` until 021.
+- **Scales (`scale.ts`, pure):**
+  - **Real:** 1 unit = 10⁶ km for every radius and distance.
+  - **Stylised:** radius `(r / R⊕)^0.25` (Sun capped at 3). Moons on their own rings by true order. Planets on
+    packed rings, each clear of its neighbours at any angle, plus `1.5 · ln(aᵢ / aᵢ₋₁)` so wider true gaps stay
+    wider. The system extent is ≈ 57 units; at the home view every body is ≥ 3.3 px at 1280 × 720 and ≥ 1.6 px at
+    320 × 640 (unit-tested with a real perspective camera).
+- **Scene graph (`scene.ts`), ready for 021's motion:** `system` → Sun mesh + decay-0 `PointLight` + faint
+  ambient. For each planet an orbit group holds the planet mesh and one orbit group per moon, so moons never
+  inherit the planet's scale.
+  - **Precision:** every body is its own `Mesh` sharing one `SphereGeometry(1, 48, 24)`, so three builds each
+    model-view matrix in float64. Instancing would put real-scale positions into float32 and jitter.
+  - **Switching scale:** `applyLayout()` only moves groups and rescales meshes.
+- **The Space (`index.ts`):**
+  - **Scale choice:** remembered in `localStorage` (`world.solarSystem.scale`, stylised by default).
+  - **Switching:** re-layout, markers on or off, then `setHome()` + `reset()`, which re-frames the whole system
+    instantly, even a moved camera.
+  - **Home view:** from 35° off vertical at `frameDistance(extent, fov 40°, aspect, 0.85)`. The closest distance
+    is 1.2 × the radius of the body orbited.
+  - **Depth, every frame after the controls:**
+    - near plane at half the distance to the nearest surface, clamped to [10⁻⁶, 1];
+    - far plane at the camera's distance from the Sun + 2 × extent;
+    - the projection updates only on a > 10 % change.
+- **Re-centring zoom (D-023):** at real scale, a `wheel` (capture phase, before OrbitControls) or a pinch's
+  second touch-down within 24 px of a body calls `focusOn(body, { minDistance: 1.2 r })`. Zoom speed 4. A moving
+  pinch also pans by its midpoint, as two-finger gestures do.
+- **Real-scale markers (`markers.ts`, AC-8a):** an `aria-hidden` layer of labels (dot + name) that lets
+  pointer events through.
+  - **Placement:** projected with `toScreen()`; written only when something changed.
+  - **Moons:** hidden within 24 px of their planet's marker.
+  - **Declutter (D-024):** by body size, a name shows only if its box clears every name already shown (others
+    keep their dot), and a name near the right edge sits left of its dot. Name sizes are measured once per show
+    or resize.
+  - **`nearest(x, y, r)`** finds the body for re-centring.
+- **Scale toggle (`scale-toggle.ts`, AC-7):** a "True scale" button with `aria-pressed`, plus a visually hidden
+  polite description that the canvas's `aria-describedby` points at, so the 3D view always states its scale.
+- **Tab order:** back link → 3D view → info toggle → "True scale" → "?" → "Reset view".
+- **Budget:** 12.3 KB gzipped, no assets; entry +0.5 KB.
+
+## Multi-Object Pattern (planned, 021–023)
+
+- 021 moves the orbit groups with pure functions in `orbit.ts`, e.g. `positionAt(orbitalElements, t)`, unit-tested
+  without WebGL. It replaces `displayAngleDeg` with computed positions.
+- 022 adds textures, Saturn's rings, the starfield background and the Sun's glow; 023 adds selection and flying
+  to a body (it may reuse `focusOn`).

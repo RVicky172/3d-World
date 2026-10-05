@@ -6,9 +6,16 @@ import type { SpaceMeta } from '../core/types';
  */
 export const spaces: readonly SpaceMeta[] = [
   {
+    id: 'solar-system',
+    title: 'Solar System',
+    description: 'The Sun, the eight planets and their largest moons, at a readable scale or true to scale.',
+    kind: 'multi',
+    load: () => import('./solar-system'),
+  },
+  {
     id: 'sheen-chair',
     title: 'Sheen Chair',
-    description: 'A velvet armchair to turn, zoom and inspect from every angle, lit like a photo studio.',
+    description: 'A velvet lounge chair to turn, zoom and inspect from every angle, lit like a photo studio.',
     kind: 'single',
     load: () => import('./sheen-chair'),
   },
