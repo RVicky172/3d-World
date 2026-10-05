@@ -130,6 +130,49 @@ export function contentBounds(page: Page): Promise<ContentBounds> {
   });
 }
 
+/**
+ * The canvas's drawing buffer as RGBA bytes (spec 011 parity). Sent as base64: a JSON array of a 1280×720
+ * buffer is millions of numbers and slow to transfer. Needs the test build's preserveDrawingBuffer.
+ */
+export async function canvasRgba(page: Page): Promise<{ width: number; height: number; data: Uint8Array }> {
+  const { width, height, base64 } = await page.evaluate(() => {
+    const source = document.querySelector<HTMLCanvasElement>('#app canvas');
+    if (!source) throw new Error('canvas not found');
+    const copy = document.createElement('canvas');
+    copy.width = source.width;
+    copy.height = source.height;
+    const ctx = copy.getContext('2d');
+    if (!ctx) throw new Error('2d context unavailable');
+    ctx.drawImage(source, 0, 0);
+    const bytes = ctx.getImageData(0, 0, copy.width, copy.height).data;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return { width: copy.width, height: copy.height, base64: btoa(binary) };
+  });
+  return { width, height, data: new Uint8Array(Buffer.from(base64, 'base64')) };
+}
+
+/**
+ * Mean absolute RGB difference (0–255) between two same-sized renders, over the pixels where either shows the
+ * model (differs from the background corner pixel, as in `contentBounds`). 0 = identical (spec 011, AC-2).
+ */
+export function meanPixelDifference(a: Uint8Array, b: Uint8Array): number {
+  if (a.length !== b.length) throw new Error(`renders differ in size: ${a.length} vs ${b.length} bytes`);
+  const [r0 = 0, g0 = 0, b0 = 0] = a;
+  const isBackground = (x: Uint8Array, i: number) =>
+    Math.abs((x[i] ?? 0) - r0) + Math.abs((x[i + 1] ?? 0) - g0) + Math.abs((x[i + 2] ?? 0) - b0) <= 12;
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < a.length; i += 4) {
+    if (isBackground(a, i) && isBackground(b, i)) continue;
+    for (let c = 0; c < 3; c++) sum += Math.abs((a[i + c] ?? 0) - (b[i + c] ?? 0)) / 3;
+    count++;
+  }
+  return count === 0 ? 0 : sum / count;
+}
+
 /** Camera pose from the test hook (spec 004). */
 export type CameraPose = { position: number[]; quaternion: number[] };
 

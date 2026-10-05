@@ -2,7 +2,7 @@
 import { gzipSync } from 'node:zlib';
 
 /**
- * @typedef {{ file: string; isEntry?: boolean; isDynamicEntry?: boolean; imports?: string[]; dynamicImports?: string[] }} ManifestChunk
+ * @typedef {{ file: string; isEntry?: boolean; isDynamicEntry?: boolean; imports?: string[]; dynamicImports?: string[]; assets?: string[] }} ManifestChunk
  * @typedef {Record<string, ManifestChunk>} Manifest
  * @typedef {{
  *   manifest: Manifest;
@@ -87,30 +87,42 @@ export function spaceIdOf(source) {
 /**
  * Files only a Space needs: its own chunk plus everything it imports statically that the entry
  * doesn't already load (e.g. the shared model viewer), so shared entry code isn't charged to it.
+ * `emitted` are the static files those chunks reference through `new URL(…, import.meta.url)`, such as
+ * three's KTX2 transcoder (spec 011), minus any the entry also uses.
  * @param {Manifest} manifest
  * @param {string} source
  * @param {Set<string>} entry
+ * @returns {{ code: string[]; emitted: string[] }}
  */
 function spaceFiles(manifest, source, entry) {
+  const entryAssets = new Set(
+    Object.values(manifest)
+      .filter((chunk) => entry.has(chunk.file))
+      .flatMap((chunk) => chunk.assets ?? []),
+  );
   const seen = new Set();
   /** @type {string[]} */
-  const files = [];
+  const code = [];
+  /** @type {Set<string>} */
+  const emitted = new Set();
   /** @param {string} key */
   const visit = (key) => {
     const chunk = manifest[key];
     if (!chunk || seen.has(key) || entry.has(chunk.file)) return;
     seen.add(key);
-    files.push(chunk.file);
+    code.push(chunk.file);
+    (chunk.assets ?? []).filter((file) => !entryAssets.has(file)).forEach((file) => emitted.add(file));
     (chunk.imports ?? []).forEach(visit);
   };
   visit(source);
-  return files;
+  return { code, emitted: [...emitted] };
 }
 
 /**
- * Constitution IV / spec 010 AC-12: each Space's own code (gzipped) plus its `public/assets/<id>/`
- * folder must fit `budgetBytes` (5 MB unless a spec justifies more). Asset bytes are counted as stored:
- * GLB and image files are already compressed formats.
+ * Constitution IV / spec 010 AC-12, 011 AC-6: each Space's own code (gzipped), its `public/assets/<id>/`
+ * folder, and the files its lazy chunks emit (e.g. the KTX2 transcoder) must fit `budgetBytes` (5 MB unless a
+ * spec justifies more). Assets and emitted files are counted as stored: GLB and KTX2 are already compressed,
+ * and static hosts may not gzip `.wasm`.
  * @param {{
  *   manifest: Manifest;
  *   spaceSources: string[];
@@ -118,27 +130,29 @@ function spaceFiles(manifest, source, entry) {
  *   assetBytes: (spaceId: string) => number;
  *   budgetBytes: number;
  * }} input
- * @returns {{ errors: string[]; sizes: { id: string; codeGzipBytes: number; assetBytes: number; totalBytes: number }[] }}
+ * @returns {{ errors: string[]; sizes: { id: string; codeGzipBytes: number; assetBytes: number; emittedBytes: number; totalBytes: number }[] }}
  */
 export function checkSpaceBudgets({ manifest, spaceSources, readFile, assetBytes, budgetBytes }) {
   const entry = new Set(entryFiles(manifest));
   const mb = (/** @type {number} */ bytes) => (bytes / 1024 / 1024).toFixed(1);
+  const size = (/** @type {number} */ bytes) =>
+    bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${mb(bytes)} MB`;
   /** @type {string[]} */
   const errors = [];
   const sizes = [];
   for (const source of spaceSources) {
     if (!manifest[source]) continue; // reported by checkBundle
     const id = spaceIdOf(source);
-    const codeGzipBytes = spaceFiles(manifest, source, entry).reduce(
-      (sum, file) => sum + gzipSync(readFile(file)).length,
-      0,
-    );
+    const { code, emitted } = spaceFiles(manifest, source, entry);
+    const codeGzipBytes = code.reduce((sum, file) => sum + gzipSync(readFile(file)).length, 0);
+    const emittedBytes = emitted.reduce((sum, file) => sum + readFile(file).length, 0);
     const assets = assetBytes(id);
-    const totalBytes = codeGzipBytes + assets;
-    sizes.push({ id, codeGzipBytes, assetBytes: assets, totalBytes });
+    const totalBytes = codeGzipBytes + assets + emittedBytes;
+    sizes.push({ id, codeGzipBytes, assetBytes: assets, emittedBytes, totalBytes });
     if (totalBytes > budgetBytes) {
       errors.push(
-        `Space ${id} is ${mb(totalBytes)} MB (code + assets), over the ${mb(budgetBytes).replace(/\.0$/, '')} MB budget (Constitution IV).`,
+        `Space ${id} is ${mb(totalBytes)} MB (code ${size(codeGzipBytes)} + assets ${size(assets)} + ` +
+          `emitted files ${size(emittedBytes)}), over the ${mb(budgetBytes).replace(/\.0$/, '')} MB budget (Constitution IV).`,
       );
     }
   }

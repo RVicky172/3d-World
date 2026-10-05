@@ -24,6 +24,11 @@ export interface SpaceContext {
   reducedMotion: boolean;
   /** Aborted right before `dispose()` — use it for listeners and fetches. */
   signal: AbortSignal;
+  /**
+   * Download progress while the view opens: 0–1, or null when the total is unknown (spec 011, AC-8).
+   * Shown by the loading indicator; calls after the open has finished, failed or been superseded do nothing.
+   */
+  reportProgress?(fraction: number | null): void;
 }
 
 /** A live, mounted Space. */

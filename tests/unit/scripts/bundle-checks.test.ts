@@ -133,6 +133,53 @@ describe('checkSpaceBudgets (spec 010, AC-12)', () => {
     expect(sizes[0]?.assetBytes).toBe(0);
   });
 
+  describe('emitted files such as the KTX2 transcoder (spec 011, AC-6)', () => {
+    /** The Space and its lazy helper each reference an emitted file; the entry references one of its own. */
+    const emittingManifest = {
+      ...lazyManifest,
+      'index.html': { ...lazyManifest['index.html'], assets: ['assets/logo.svg'] },
+      'src/spaces/demo-cube/index.ts': {
+        ...lazyManifest['src/spaces/demo-cube/index.ts'],
+        assets: ['assets/transcoder.wasm', 'assets/logo.svg'],
+      },
+      '_viewer.js': { ...lazyManifest['_viewer.js'], assets: ['assets/transcoder.js'] },
+    };
+    const emittingFiles: Record<string, string> = {
+      ...lazyFiles,
+      'assets/transcoder.wasm': 'w'.repeat(30_000), // compresses well, but is counted as stored
+      'assets/transcoder.js': 'j'.repeat(2_000),
+      'assets/logo.svg': 's'.repeat(9_000),
+    };
+    const emitting = (budgetBytes = 5 * 1024 * 1024) => ({
+      ...input(() => 1000, budgetBytes),
+      manifest: emittingManifest,
+      readFile: (file: string) => emittingFiles[file] ?? '',
+    });
+
+    it('counts files emitted by the Space’s lazy chunks at their stored size', () => {
+      const { sizes } = checkSpaceBudgets(emitting());
+      expect(sizes[0]?.emittedBytes).toBe(32_000);
+      expect(sizes[0]?.totalBytes).toBe((sizes[0]?.codeGzipBytes ?? 0) + 1000 + 32_000);
+    });
+
+    it('does not charge a Space for files the entry also uses', () => {
+      const { sizes } = checkSpaceBudgets(emitting());
+      expect(sizes[0]?.emittedBytes).not.toBeGreaterThan(32_000); // logo.svg (9 000) is the entry's
+    });
+
+    it('a Space without emitted files reports 0', () => {
+      expect(checkSpaceBudgets(input(() => 0)).sizes[0]?.emittedBytes).toBe(0);
+    });
+
+    it('the over-budget message breaks the total down, including emitted files', () => {
+      const { errors } = checkSpaceBudgets(emitting(20_000));
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatch(/demo-cube/);
+      expect(errors[0]).toMatch(/assets 1\.0 KB/);
+      expect(errors[0]).toMatch(/emitted files 31\.3 KB/);
+    });
+  });
+
   it('skips Spaces missing from the build (checkBundle reports those)', () => {
     const result = checkSpaceBudgets({ ...input(() => 0), spaceSources: ['src/spaces/nope/index.ts'] });
     expect(result).toEqual({ errors: [], sizes: [] });

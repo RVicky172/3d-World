@@ -1,6 +1,7 @@
 import type { WebGLRenderer } from 'three';
 import { findSpace, spaces } from '../spaces/registry';
 import { clearMessage, showMessage, type MessageKind } from '../ui/messages';
+import { clampProgress } from './progress';
 import type { OpenResult, SpaceFactory, SpaceInstance, SpaceMeta } from './types';
 
 /** The parts of `Engine` the manager needs. */
@@ -26,6 +27,10 @@ export type ViewName = 'gallery' | 'space';
 /** Shown while a view takes a while to load (spec 010, AC-8): the fader hides the view's own DOM meanwhile. */
 export interface LoadingIndicator {
   show(label: string): void;
+  /** Download progress, 0–1 or null (spec 011); only called while shown. */
+  progress?(fraction: number | null): void;
+  /** The view is ready after a shown indicator: announce it (spec 011, D-019). Falls back to `hide()`. */
+  ready?(): void;
   hide(): void;
 }
 
@@ -80,8 +85,13 @@ export class SpaceManager {
   private target: Target | null = null;
   private readonly loading: LoadingIndicator | null;
   private readonly loadingDelayMs: number;
-  /** The request whose loading timer is pending or whose indicator is showing. */
-  private loadingFor: { token: number; timer: ReturnType<typeof setTimeout> } | null = null;
+  /** The request whose loading timer is pending or whose indicator is showing, and its latest progress. */
+  private loadingFor: {
+    token: number;
+    timer: ReturnType<typeof setTimeout>;
+    shown: boolean;
+    progress: number | null;
+  } | null = null;
   private sequence = 0;
   /** False until the first view mounts: focus is never moved on the initial page view (AC-13). */
   private hasMounted = false;
@@ -204,6 +214,7 @@ export class SpaceManager {
         overlay: this.engine.overlay,
         reducedMotion: this.reducedMotion(),
         signal: controller.signal,
+        reportProgress: (fraction) => this.reportProgress(token, fraction),
       });
     } catch (error) {
       if (isStale()) return 'superseded';
@@ -220,7 +231,7 @@ export class SpaceManager {
     this.hasMounted = true;
     await this.engine.nextFrame();
     if (isStale()) return 'superseded';
-    this.stopLoading(token); // gone before the view fades in
+    this.finishLoading(token); // gone before the view fades in
 
     await this.fader.in();
     if (isStale()) return 'superseded';
@@ -261,8 +272,33 @@ export class SpaceManager {
   private startLoading(token: number, title: string): void {
     if (!this.loading) return;
     const loading = this.loading;
-    const timer = setTimeout(() => loading.show(title), this.loadingDelayMs);
-    this.loadingFor = { token, timer };
+    const timer = setTimeout(() => {
+      const state = this.loadingFor;
+      if (state?.token !== token) return;
+      state.shown = true;
+      loading.show(title);
+      // Progress reported during the delay appears with the indicator (spec 011, AC-8).
+      if (state.progress !== null) loading.progress?.(state.progress);
+    }, this.loadingDelayMs);
+    this.loadingFor = { token, timer, shown: false, progress: null };
+  }
+
+  /** Success: a shown indicator says "<title> loaded" (D-019); a pending timer is just cancelled. */
+  private finishLoading(token: number): void {
+    const state = this.loadingFor;
+    if (!this.loading || state?.token !== token || !state.shown) return this.stopLoading(token);
+    clearTimeout(state.timer);
+    this.loadingFor = null;
+    if (this.loading.ready) this.loading.ready();
+    else this.loading.hide();
+  }
+
+  /** Forwards a view's download progress, but only while its own request is the one loading (AC-11). */
+  private reportProgress(token: number, fraction: number | null): void {
+    const state = this.loadingFor;
+    if (!this.loading || state?.token !== token) return;
+    state.progress = clampProgress(state.progress, fraction);
+    if (state.shown) this.loading.progress?.(fraction);
   }
 
   /** Cancels the pending timer and hides the indicator; with `token`, only if it belongs to that request. */

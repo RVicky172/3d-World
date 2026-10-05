@@ -29,6 +29,7 @@
 src/
   main.ts                 # bootstrap: WebGL check + renderer (or fallback) → startApp(): motion watcher → Engine → Fader → loading indicator → SpaceManager → gallery view + back link → ContextGuard → HashRouter.start()
   core/
+    progress.ts           # pure: clampProgress(), announcementFor() — download progress rules (011)
     types.ts              # the Space contract + RendererLike + OpenResult
     clock.ts              # Clock, createClock(), FakeClock: timestamps → { delta, elapsed }
     render-loop.ts        # RenderLoop: injectable Scheduler + VisibilitySource; pauses when hidden
@@ -48,6 +49,7 @@ src/
       types.ts            # CameraControlsConfig, CameraControlsOptions, CameraControls
     model-viewer/
       index.ts            # createModelViewer(): load GLB → centre → studio environment → controls → credit (010)
+      loader.ts           # createGltfLoader(): Meshopt + KTX2, transcoder ready before parsing, progress (011)
       framing.ts          # pure: frameDistance(), distanceLimits(), fitModel()
       credit.ts           # visible asset credit line (.model-credit)
       types.ts            # ModelViewerConfig, AssetCredit (SPDX licence ids)
@@ -62,7 +64,7 @@ src/
     messages.ts           # "Space not found" / "Failed to load" alerts in the overlay
     fallback.ts           # WebGL2-unavailable screen (sets data-webgl="unavailable")
     context-lost.ts       # "The 3D view stopped" alert with a Reload button (005)
-    loading.ts            # createLoadingIndicator(): "Loading <title>…" status (010)
+    loading.ts            # createLoadingIndicator(): "Loading <title>…", bar + % (011), "<title> loaded" announcer
   spaces/
     registry.ts           # spaces[] with lazy loaders, findSpace()
     <space-id>/
@@ -70,8 +72,12 @@ src/
       data.ts             # typed scene data (e.g. sheen-chair: ModelViewerConfig)
   styles/main.css         # tokens; stacking: canvas → .overlay → .fader → .loading / .context-lost → .back-to-gallery
 scripts/
-  bundle-checks.mjs       # pure bundle rules (unit-tested): entry budget, per-Space 5 MB (code + assets)
+  bundle-checks.mjs       # pure bundle rules (unit-tested): entry budget, per-Space 5 MB (code + assets + emitted decoders)
   check-bundle.mjs        # runs them on dist/ after `npm run build`
+  asset-pipeline.mjs      # pure pipeline rules (unit-tested): manifest validation, texture modes, output checks (011)
+  assets.config.mjs       # which models `npm run assets` converts, and how
+  build-assets.mjs        # `npm run assets`: assets-src/ → Meshopt + KTX2 GLB in public/assets/ (dev only)
+assets-src/<space-id>/    # original, uncompressed models; NOT deployed (011, D-017)
 tests/
   helpers/fakes.ts        # FakeScheduler, FakeVisibility, createFakeRenderer, createFakeContext
   unit/                   # Vitest, mirrors src/ (+ scripts/)
@@ -170,8 +176,10 @@ open(B) / openView('gallery', f)
   → await load()                      rejects → close A, show "Failed to load"  → 'load-error'
   → A: abort signal, dispose(); engine.setInstance(null)   (never renders a disposed Space)
   → B = await factory(ctx)            throws  → show "Failed to load"           → 'load-error'
-                                      (a model Space downloads its GLB here, so asset errors land here too)
-  → loading.hide()                    also on every failure, supersession, suspend() and close()
+                                      (a model Space downloads its GLB here, so asset errors land here too;
+                                       ctx.reportProgress(f) moves the indicator's bar, 011)
+  → loading.ready() if it was shown   says "<title> loaded" (011, D-019); else just hide()
+                                      failures, supersession, suspend() and close() always hide() silently
   → engine.setInstance(B) → restore lost focus (not on the first view) → await engine.nextFrame() → fader.in()
   → <body data-space-id="B" data-space-status="opened" data-space-ready="true">  → 'opened'
                                       (data-space-id only for registry Spaces)
@@ -192,6 +200,16 @@ open(B) / openView('gallery', f)
   (default 250 ms). The timer starts **after** the fade-out, so ordinary fades never show it, and a view that is
   ready sooner never shows it. It reads "Loading <registry title>…" (the view's label for the gallery), is a
   `role="status"`, `aria-live="polite"` element, and its pulse is off under reduced motion.
+- **Progress (011, AC-8–AC-11):** `SpaceContext.reportProgress?(fraction | null)` is bound to the request's
+  token, so a superseded, finished or suspended request can't move the bar. Values from before the 250 ms show
+  are kept and applied when it appears.
+  - The indicator turns determinate on the first value: a visible, `aria-hidden` "Loading <title>… 42 %" and a
+    `role="progressbar"` bar. Its spoken label (visually hidden from then on) changes only at 25/50/75 %
+    (`announcementFor`). Values never go backwards (`clampProgress`), and a null (unknown total) keeps 010's
+    look. The bar doesn't ease under reduced motion.
+  - **`ready()`** (D-019): a persistent, visually hidden `.loading-announcer` polite region says "<title>
+    loaded". It's created on `show()` (live regions must exist before their text changes) and cleared on the
+    next show. Only `SpaceManager`'s success path calls it, and only after a shown indicator.
 
 ### Transition (Fader)
 
@@ -316,14 +334,14 @@ label, config })` in its factory. It calls `controls.update(delta)` from `update
 - **Bundle note:** OrbitControls stays in the lazy chunk, but the three core classes it uses join the shared
   `three` module that the entry loads (+1.4 KB for 004, D-010).
 
-## Model Viewer (`src/shared/model-viewer/`, 010)
+## Model Viewer (`src/shared/model-viewer/`, 010–011)
 
 "One object, many angles". A model Space is its data plus one line, `(ctx) => createModelViewer(ctx, CONFIG)`
 (D-012). The viewer and three's `GLTFLoader` ship only in lazy chunks, but the three core classes they use join the
 shared `three` module (+8.3 KB entry, D-013).
 
 - **Order:** load the GLB from `BASE_URL + model.path` **first**, so a failed download allocates nothing and
-  rejects into "Failed to load" (AC-9) → `fitModel()` centres the model on the origin and returns its
+  rejects into "Failed to load" (AC-9). The loader is disposed as soon as loading settles (011) → `fitModel()` centres the model on the origin and returns its
   bounding-sphere radius `r` → studio environment → camera + shared controls → credit line.
 - **Framing (pure, `framing.ts`):** `frameDistance(r, fovY, aspect, fill)` puts the sphere at `fill` of the
   smaller viewport dimension (portrait by width, landscape by height). Limits: `min = 1.2 r` (never inside),
@@ -339,8 +357,40 @@ shared `three` module (+8.3 KB entry, D-013).
   line per asset, "<title> by <author> · <licence>", the title linking to the source.
 - **Data (`ModelViewerConfig`):** title, model path, camera FOV + direction, optional `fill`, turntable, and
   `assets[]` (path, title, author, SPDX licence, source). A unit test checks every asset against `CREDITS.md`.
-- **Budget:** `check-bundle.mjs` sums each Space's own lazy code (gzipped) plus `public/assets/<id>/` and fails
-  the build over 5 MB (AC-12).
+- **Loader (`loader.ts`, 011):** `GLTFLoader` + `MeshoptDecoder` (`EXT_meshopt_compression`; JS with embedded
+  WASM, bundled in the lazy chunk) + `KTX2Loader` (`KHR_texture_basisu`; `detectSupport(renderer)`, 2 workers).
+  - **Self-hosted transcoder, no config:** the transcoder path is left unset. three finds
+    `basis_transcoder.js/.wasm` via `new URL(…, import.meta.url)`, so Vite emits them as hashed build assets
+    (manifest `assets` of the chunk), and the dev server serves them from `node_modules`. Entry +0.8 KB.
+  - **`load()`:** `Promise.all([FileLoader download (arraybuffer, progress), ktx2.init()])`, then
+    `gltf.parseAsync(bytes, urlBase)`. GLTFLoader swallows texture errors (it logs them and renders
+    untextured), so the transcoder must be ready before parsing for a failure to reach "Failed to load".
+    Parsing after both succeed also keeps a failed `init()` from leaving a background parse logging errors.
+  - **`dispose()`** ends the transcoder workers. The viewer calls it in a `finally` right after `load()`:
+    workers are idle once textures are transcoded, so they never pile up, and two loaders are never active at
+    once (KTX2Loader warns about that).
+- **Budget:** `check-bundle.mjs` sums each Space's own lazy code (gzipped), `public/assets/<id>/`, and the files
+  its lazy chunks emit (the transcoder, stored size, since hosts may not gzip `.wasm`), and fails the build over
+  5 MB (010 AC-12, 011 AC-6). sheen-chair: 52 KB + 1.26 MB + 571 KB = 1.86 MB.
+
+## Asset Pipeline (`npm run assets`, 011)
+
+Originals live in `assets-src/<space-id>/` (in git, not deployed). `npm run assets` (`scripts/build-assets.mjs`,
+dev-only tooling: glTF-Transform, meshoptimizer, ktx2-encoder, sharp; D-018) converts every entry in
+`scripts/assets.config.mjs` and writes `public/assets/…`. Its output is committed, so build, tests and deploy
+never run the encoder.
+
+- **Steps per model:** `dedup` → `prune` → `weld` → each texture, one at a time: an optional per-slot resize
+  (`maxSize`, e.g. the chair's `normalTexture: 512`), then `encodeToKTX2`. Colour slots get ETC1S (perceptual,
+  sRGB); data slots (normal, ORM, roughness) get UASTC + Zstandard. A texture shared by both gets the data mode.
+  Then `KHR_texture_basisu` is marked required, and `meshopt({ level: 'medium' })` runs.
+- **Output checks (`checkOutput`):** under `maxBytes`, no source extension lost (sheen, texture transform,
+  variants), Meshopt and Basis present, and **every texture `image/ktx2`**. glTF-Transform's `ktx2()` transform
+  only warns on failure, which is why the pipeline encodes per texture and checks afterwards. Any problem exits 1
+  naming the model.
+- **Deterministic:** two runs give byte-identical files. Chair: 4 029 KB → 1 286 KB in ~8 s.
+- **Adding a model:** put the original in `assets-src/<id>/`, add a manifest entry (`maxBytes`, texture modes,
+  optional caps), run `npm run assets`, add the CREDITS row (marked "converted"), and commit both files.
 
 ## Resilience & Reduced Motion (005)
 
@@ -384,27 +434,31 @@ composers.
 
 ## Testability Seams
 
-| Seam                          | Real                                             | In tests                                                                              |
-| ----------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| Time                          | `createClock()`                                  | `FakeClock`                                                                           |
-| Frames                        | `requestAnimationFrame`                          | `FakeScheduler.flush(now)`                                                            |
-| Visibility                    | `document`                                       | `FakeVisibility.set('hidden')`                                                        |
-| Renderer (Engine)             | `WebGLRenderer`                                  | `createFakeRenderer()` (`RendererLike`)                                               |
-| Resize                        | `ResizeObserver`                                 | injected `watchResize` callback                                                       |
-| Space context                 | built by `SpaceManager`                          | `createFakeContext()`                                                                 |
-| Engine/Fader (Manager)        | `Engine`, `Fader`                                | `ManagedEngine`, `Transition` fakes                                                   |
-| URL + history (Router)        | `window.location`, `window.history`, `window`    | `FakeBrowserLocation` (all three in one)                                              |
-| Camera controls (unit)        | OrbitControls on the real canvas                 | real OrbitControls on a jsdom canvas; keyboard/wheel events; `FakeClock`-style deltas |
-| Touch input (E2E)             | fingers                                          | `touchGesture()`: CDP `Input.dispatchTouchEvent` (Chromium)                           |
-| Gallery (unit)                | `createGalleryView` in `main.ts`                 | injected test registry; `createFakeContext()`                                         |
-| Sub-path hosting (E2E)        | GitHub Pages `/3d-World/`                        | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174               |
-| Running app (E2E)             | —                                                | `window.__WORLD__` in `npm run build:test` builds                                     |
-| Context loss                  | GPU/driver reset on the renderer's canvas        | unit: `EventTarget` canvas + fake engine/manager; E2E: `__WORLD__.loseContext()`      |
-| Motion preference             | `matchMedia('(prefers-reduced-motion: reduce)')` | unit: fake `MediaQueryList` (`EventTarget` + `matches`); E2E: `page.emulateMedia()`   |
-| No WebGL2 / no renderer (E2E) | the browser                                      | init script patching `HTMLCanvasElement.prototype.getContext`                         |
-| Model loading (unit)          | `GLTFLoader`, PMREM studio environment, BASE_URL | `ModelViewerDeps`: stub `loader`, `createEnvironment`, `baseUrl`                      |
-| Slow / failed download (E2E)  | the network                                      | `page.route()` delaying or aborting the GLB                                           |
-| Framing and lighting (E2E)    | what the visitor sees                            | `contentBounds()`: drawing-buffer bounds, fill of the smaller side, mean luminance    |
+| Seam                          | Real                                                       | In tests                                                                               |
+| ----------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Time                          | `createClock()`                                            | `FakeClock`                                                                            |
+| Frames                        | `requestAnimationFrame`                                    | `FakeScheduler.flush(now)`                                                             |
+| Visibility                    | `document`                                                 | `FakeVisibility.set('hidden')`                                                         |
+| Renderer (Engine)             | `WebGLRenderer`                                            | `createFakeRenderer()` (`RendererLike`)                                                |
+| Resize                        | `ResizeObserver`                                           | injected `watchResize` callback                                                        |
+| Space context                 | built by `SpaceManager`                                    | `createFakeContext()`                                                                  |
+| Engine/Fader (Manager)        | `Engine`, `Fader`                                          | `ManagedEngine`, `Transition` fakes                                                    |
+| URL + history (Router)        | `window.location`, `window.history`, `window`              | `FakeBrowserLocation` (all three in one)                                               |
+| Camera controls (unit)        | OrbitControls on the real canvas                           | real OrbitControls on a jsdom canvas; keyboard/wheel events; `FakeClock`-style deltas  |
+| Touch input (E2E)             | fingers                                                    | `touchGesture()`: CDP `Input.dispatchTouchEvent` (Chromium)                            |
+| Gallery (unit)                | `createGalleryView` in `main.ts`                           | injected test registry; `createFakeContext()`                                          |
+| Sub-path hosting (E2E)        | GitHub Pages `/3d-World/`                                  | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174                |
+| Running app (E2E)             | —                                                          | `window.__WORLD__` in `npm run build:test` builds                                      |
+| Context loss                  | GPU/driver reset on the renderer's canvas                  | unit: `EventTarget` canvas + fake engine/manager; E2E: `__WORLD__.loseContext()`       |
+| Motion preference             | `matchMedia('(prefers-reduced-motion: reduce)')`           | unit: fake `MediaQueryList` (`EventTarget` + `matches`); E2E: `page.emulateMedia()`    |
+| No WebGL2 / no renderer (E2E) | the browser                                                | init script patching `HTMLCanvasElement.prototype.getContext`                          |
+| Model loading (unit)          | `createGltfLoader`, PMREM studio environment, BASE_URL     | `ModelViewerDeps`: stub `createLoader`, `createEnvironment`, `baseUrl`                 |
+| Loader parts (unit)           | `FileLoader`, `KTX2Loader`, `GLTFLoader`, `MeshoptDecoder` | `LoaderParts` fakes passed to `createGltfLoader(renderer, parts)`                      |
+| Download progress (E2E)       | a slow network                                             | CDP `Network.emulateNetworkConditions` + a MutationObserver log                        |
+| Decoder workers (E2E)         | KTX2Loader's worker pool                                   | `page.workers()` / `page.on('worker')`                                                 |
+| Visual parity (E2E)           | the original model                                         | `page.route` serving `assets-src/…`; `canvasRgba()` + `meanPixelDifference()`          |
+| Slow / failed download (E2E)  | the network                                                | `page.route()` delaying or aborting the GLB, the transcoder, or serving a corrupt file |
+| Framing and lighting (E2E)    | what the visitor sees                                      | `contentBounds()`: drawing-buffer bounds, fill of the smaller side, mean luminance     |
 
 `window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory`, `cameraAspect`, `cameraPose`, and
 `loseContext` / `restoreContext` (three's `forceContextLoss/Restore`; restore only after `data-webgl="lost"`). It is installed behind a

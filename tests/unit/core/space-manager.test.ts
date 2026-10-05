@@ -376,12 +376,19 @@ describe('SpaceManager', () => {
     let loading: {
       show: ReturnType<typeof vi.fn<(label: string) => void>>;
       hide: ReturnType<typeof vi.fn<() => void>>;
+      progress: ReturnType<typeof vi.fn<(fraction: number | null) => void>>;
+      ready: ReturnType<typeof vi.fn<() => void>>;
     };
     let slow: SpaceManager;
 
     beforeEach(() => {
       vi.useFakeTimers();
-      loading = { show: vi.fn<(label: string) => void>(), hide: vi.fn<() => void>() };
+      loading = {
+        show: vi.fn<(label: string) => void>(),
+        hide: vi.fn<() => void>(),
+        progress: vi.fn<(fraction: number | null) => void>(),
+        ready: vi.fn<() => void>(),
+      };
       a.meta.title = 'Space A';
       slow = new SpaceManager({
         engine,
@@ -495,6 +502,178 @@ describe('SpaceManager', () => {
       await slow.open('a');
       await vi.advanceTimersByTimeAsync(1000);
       expect(loading.show).not.toHaveBeenCalled();
+    });
+
+    describe('"loaded" announcement (spec 011, AC-9, D-019)', () => {
+      it('a slow open that showed the indicator ends with ready(), not hide()', async () => {
+        const release = await holdLoad(a);
+        const opening = slow.open('a');
+        await vi.advanceTimersByTimeAsync(300);
+        loading.hide.mockClear();
+        release();
+        await expect(opening).resolves.toBe('opened');
+        expect(loading.ready).toHaveBeenCalledTimes(1);
+        expect(loading.hide).not.toHaveBeenCalled();
+      });
+
+      it('a fast open never announces', async () => {
+        await slow.open('a');
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(loading.ready).not.toHaveBeenCalled();
+      });
+
+      it('failure, supersession and suspend() hide without announcing', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const gate = deferred<void>();
+        a.load.mockImplementationOnce(async () => {
+          await gate.promise;
+          throw new Error('offline');
+        });
+        const failing = slow.open('a');
+        await vi.advanceTimersByTimeAsync(300);
+        gate.resolve();
+        await expect(failing).resolves.toBe('load-error');
+
+        const releaseA = await holdLoad(a);
+        const superseded = slow.open('a');
+        await vi.advanceTimersByTimeAsync(300);
+        await slow.open('b');
+        releaseA();
+        await expect(superseded).resolves.toBe('superseded');
+
+        const releaseB = await holdLoad(b);
+        void slow.open('b');
+        await vi.advanceTimersByTimeAsync(300);
+        slow.suspend();
+        releaseB();
+        await vi.advanceTimersByTimeAsync(10);
+
+        expect(loading.ready).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('progress (spec 011, AC-8, AC-11)', () => {
+      /** Makes the next factory run of `space` wait; exposes its context so the test can report progress. */
+      const holdFactory = async (space: ReturnType<typeof createSpace>) => {
+        const gate = deferred<void>();
+        const real = (await space.meta.load()).default;
+        let context: SpaceContext | undefined;
+        space.load.mockResolvedValueOnce({
+          default: async (ctx) => {
+            context = ctx;
+            await gate.promise;
+            return real(ctx);
+          },
+        });
+        return {
+          report: (fraction: number | null) => context!.reportProgress!(fraction),
+          release: () => gate.resolve(),
+          ctx: () => context!,
+        };
+      };
+
+      it('gives the factory a reportProgress that reaches the shown indicator', async () => {
+        const held = await holdFactory(a);
+        const opening = slow.open('a');
+        await vi.advanceTimersByTimeAsync(300);
+        expect(loading.show).toHaveBeenCalledWith('Space A');
+
+        held.report(0.4);
+        held.report(null);
+        expect(loading.progress.mock.calls).toEqual([[0.4], [null]]);
+        held.release();
+        await expect(opening).resolves.toBe('opened');
+      });
+
+      it('keeps progress reported before the indicator shows and applies it when it does', async () => {
+        const held = await holdFactory(a);
+        const opening = slow.open('a');
+        await vi.advanceTimersByTimeAsync(10);
+        held.report(0.3);
+        held.report(0.2); // never backwards: the higher value is kept
+        expect(loading.progress).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(300);
+        expect(loading.show).toHaveBeenCalledTimes(1);
+        expect(loading.progress.mock.calls).toEqual([[0.3]]);
+        expect(loading.show.mock.invocationCallOrder[0]!).toBeLessThan(
+          loading.progress.mock.invocationCallOrder[0]!,
+        );
+        held.release();
+        await opening;
+      });
+
+      it('a fast open that reported progress never shows anything', async () => {
+        const held = await holdFactory(a);
+        const opening = slow.open('a');
+        await vi.advanceTimersByTimeAsync(10); // well under the 250 ms delay
+        held.report(0.9);
+        held.release();
+        await expect(opening).resolves.toBe('opened');
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(loading.show).not.toHaveBeenCalled();
+        expect(loading.progress).not.toHaveBeenCalled();
+      });
+
+      it('ignores reports once the view has opened', async () => {
+        const held = await holdFactory(a);
+        const opening = slow.open('a');
+        await vi.advanceTimersByTimeAsync(300);
+        held.release();
+        await expect(opening).resolves.toBe('opened');
+        loading.progress.mockClear();
+        held.report(1);
+        expect(loading.progress).not.toHaveBeenCalled();
+      });
+
+      it('ignores a superseded request; the newer request reports its own', async () => {
+        const heldA = await holdFactory(a);
+        const openA = slow.open('a');
+        await vi.advanceTimersByTimeAsync(300);
+        const heldB = await holdFactory(b);
+        const openB = slow.open('b');
+        await vi.advanceTimersByTimeAsync(300);
+        loading.progress.mockClear();
+
+        heldA.report(0.9);
+        expect(loading.progress).not.toHaveBeenCalled();
+        heldB.report(0.1);
+        expect(loading.progress.mock.calls).toEqual([[0.1]]);
+
+        heldA.release();
+        heldB.release();
+        await expect(openA).resolves.toBe('superseded');
+        await expect(openB).resolves.toBe('opened');
+      });
+
+      it('ignores reports after a failure or suspend()', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const held = await holdFactory(a);
+        void slow.open('a');
+        await vi.advanceTimersByTimeAsync(300);
+        slow.suspend();
+        loading.progress.mockClear();
+        held.report(0.5);
+        expect(loading.progress).not.toHaveBeenCalled();
+        held.release();
+        await vi.advanceTimersByTimeAsync(10);
+      });
+
+      it('is a harmless no-op without a loading indicator', async () => {
+        const plain = new SpaceManager({
+          engine,
+          fader,
+          registry: [a.meta],
+          reducedMotion: () => false,
+          statusElement: status,
+        });
+        const held = await holdFactory(a);
+        const opening = plain.open('a');
+        await vi.advanceTimersByTimeAsync(10);
+        expect(() => held.report(0.5)).not.toThrow();
+        held.release();
+        await expect(opening).resolves.toBe('opened');
+      });
     });
   });
 

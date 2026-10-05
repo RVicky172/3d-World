@@ -127,3 +127,36 @@ Format:
 **Decision:** Amend AC-5: the 10 % floor applies to the bounding sphere; an open shape's outline may look smaller but stays clearly visible. No code change. Chosen by the user.
 **Alternatives:** A per-model `minFill` in data; scaling the floor automatically by each model's fill correction.
 **Consequences:** The E2E checks the camera distance against the sphere-based limit rather than pixel fill. Revisit if a future model gets lost at full zoom-out.
+
+## D-017 — Asset pipeline choices for 011 (2026-10-05)
+
+**Context:** Spec 011 open questions Q1–Q5 (compression codec, targets, source files, progress UI, entry allowance).
+**Decision (project lead):**
+
+1. Geometry compression is **Meshopt only** (no Draco).
+2. The chair's model file is **≤ 1.5 MB**; its average brightness stays within **10 %** of the original.
+3. Original models are kept in the repo under **`assets-src/`**, which is not deployed.
+4. Progress is shown as a **bar plus a percentage**; screen readers hear **25 / 50 / 75 %**, then the model appearing.
+5. The entry-growth allowance is **set by a first-task spike**: ≤ 5 KB → cap 5 KB; more → propose a number.
+
+**Alternatives:** Draco, or both codecs; a relative size target (≤ 40 %); downloading sources when the pipeline runs; a bar only or a percentage only; time-based announcements; a fixed cap or the total budget only.
+**Consequences:** One decoder for geometry (Meshopt, bundled JS) and one for textures (Basis transcoder, self-hosted WASM). The repo keeps a 4.1 MB source model. A spike may amend AC-6, as in 010 (D-013).
+
+## D-018 — Asset pipeline tooling: glTF-Transform library + ktx2-encoder (2026-10-05)
+
+**Context:** 011 converts models offline (Meshopt geometry, KTX2 textures). glTF-Transform's CLI encodes KTX2 by shelling out to KTX-Software's `toktx`, which isn't installed here and can't come from `npm install`.
+**Decision (project lead approved the 011 plan):** dev-only packages `@gltf-transform/core`, `@gltf-transform/extensions`, `@gltf-transform/functions`, `meshoptimizer` and `ktx2-encoder` (all MIT), driven by our own `scripts/build-assets.mjs` (`npm run assets`). There is no new runtime dependency: `KTX2Loader`, `MeshoptDecoder` and the Basis transcoder ship with `three`.
+**Alternatives:** glTF-Transform CLI + a system `toktx` (not reproducible from npm); Draco (rejected in D-017); a pinned copy of the decoders in `public/` (kept as the T001 fallback).
+**Addendum (2026-10-05, T003):** `sharp` (Apache-2.0, dev-only) is declared too. `ktx2-encoder` needs an `imageDecoder` in Node, and the chair's normal map is resized to 512 px. sharp was already installed through `@gltf-transform/functions` → `ndarray-pixels` (same version), so it's declared rather than relied on transitively. Approved by the project lead.
+**Consequences:** `npm install` alone reproduces the pipeline. If the T003 spike shows `ktx2-encoder` can't handle the chair in Node, fall back to KTX-Software as a documented prerequisite, with a spec note.
+
+## D-019 — Stronger parity check and a "loaded" announcement for 011 (2026-10-05)
+
+**Context:** In 011 T060, a probe showed AC-2's measure (mean model brightness within 10 %) can't detect a broken model: stripping every texture changed it by only 3.4 %. A per-pixel measure separates cleanly: mean absolute RGB difference over model pixels was 0.00 between two renders of the original, 0.33 for the compressed chair and 5.47 for an untextured one. Separately, AC-9's "then the model appearing" had no implementation: the indicator just disappears, which screen readers don't announce.
+**Decision (project lead):**
+
+1. AC-2 keeps the 10 % brightness rule and adds **mean absolute RGB difference ≤ 2.0** (of 255) over model pixels against the original, from the same view.
+2. When a view whose loading indicator was shown becomes ready, a persistent polite live region announces **"<title> loaded"** once. Fast opens (no indicator) stay silent.
+
+**Alternatives:** Replace the brightness rule with the pixel diff alone; keep AC-2 as it was (it only catches large shifts). For AC-9: reword it to limit announcements to the three steps, with no "loaded" message.
+**Consequences:** The parity E2E reads full pixel arrays from both renders (it's the slowest test in the spec). The loading indicator gains `ready()`, and `SpaceManager` calls it instead of `hide()` after a shown, successful load.

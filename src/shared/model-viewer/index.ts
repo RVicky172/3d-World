@@ -7,7 +7,6 @@ import {
   type Texture,
   type WebGLRenderer,
 } from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { prefersCoarsePointer } from '../../core/capabilities';
 import type { SpaceContext, SpaceInstance } from '../../core/types';
@@ -15,6 +14,7 @@ import { createCameraControls } from '../controls';
 import { disposeObject3D } from '../dispose';
 import { showCredit } from './credit';
 import { distanceLimits, fitModel, frameDistance } from './framing';
+import { createGltfLoader, type ModelLoader } from './loader';
 import type { ModelViewerConfig } from './types';
 
 export type { AssetCredit, ModelViewerConfig } from './types';
@@ -27,7 +27,8 @@ const ENVIRONMENT_SIGMA = 0.04;
 
 /** Seams for unit tests: no network, no WebGL. */
 export interface ModelViewerDeps {
-  loader?: { loadAsync(url: string): Promise<{ scene: Object3D }> };
+  /** Builds the model loader (Meshopt + KTX2 in the app, spec 011). */
+  createLoader?: (renderer: WebGLRenderer) => ModelLoader;
   createEnvironment?: (renderer: WebGLRenderer) => Texture;
   /** Joined with `config.model.path`; the site's base URL in the app. */
   baseUrl?: string;
@@ -56,8 +57,8 @@ function createStudioEnvironment(renderer: WebGLRenderer): Texture {
 
 /**
  * Shared "one object, many angles" viewer (spec 010). A model Space is its data plus
- * `(ctx) => createModelViewer(ctx, CONFIG)`. Loads the GLB first, so a failed load allocates nothing
- * and rejects into the SpaceManager's "Failed to load" (AC-9). The model is centred, lit by a generated
+ * `(ctx) => createModelViewer(ctx, CONFIG)`. Loads the GLB first, so a failed load (model or decoder)
+ * allocates nothing and rejects into the SpaceManager's "Failed to load" (AC-9; 011 AC-12). The model is centred, lit by a generated
  * environment, auto-framed for every viewport size (AC-2, AC-3) and explored with the shared controls.
  */
 export async function createModelViewer(
@@ -65,9 +66,15 @@ export async function createModelViewer(
   config: ModelViewerConfig,
   deps: ModelViewerDeps = {},
 ): Promise<SpaceInstance> {
-  const loader = deps.loader ?? new GLTFLoader();
   const baseUrl = deps.baseUrl ?? import.meta.env.BASE_URL;
-  const gltf = await loader.loadAsync(baseUrl + config.model.path);
+  const loader = (deps.createLoader ?? createGltfLoader)(ctx.renderer);
+  let gltf: { scene: Object3D };
+  try {
+    gltf = await loader.load(baseUrl + config.model.path, (fraction) => ctx.reportProgress?.(fraction));
+  } finally {
+    // Textures are transcoded by now, so the decoder workers are idle: free them, success or not (AC-13).
+    loader.dispose();
+  }
 
   const scene = new Scene();
   const model = gltf.scene;

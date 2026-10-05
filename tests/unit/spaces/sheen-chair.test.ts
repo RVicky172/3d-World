@@ -62,3 +62,33 @@ describe('sheen-chair licences (spec 010, AC-13)', () => {
     },
   );
 });
+
+/** The JSON chunk of a GLB (bytes 20…20+length, length = uint32 at byte 12). */
+function glbJson(path: string): { extensionsUsed?: string[]; extensionsRequired?: string[] } {
+  const bytes = readFileSync(path);
+  return JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString('utf8'));
+}
+
+describe('sheen-chair compressed model (spec 011)', () => {
+  const file = `public/${SHEEN_CHAIR.model.path}`;
+
+  it('AC-1: ships at most 1.5 MB', () => {
+    expect(readFileSync(file).byteLength).toBeLessThanOrEqual(1.5 * 1024 * 1024);
+  });
+
+  it('AC-1: uses Meshopt geometry and KTX2 textures, and keeps the velvet sheen', () => {
+    const { extensionsUsed = [], extensionsRequired = [] } = glbJson(file);
+    expect(extensionsUsed).toEqual(
+      expect.arrayContaining(['EXT_meshopt_compression', 'KHR_texture_basisu', 'KHR_materials_sheen']),
+    );
+    // Required, so a viewer that can't decode them fails loudly instead of rendering garbage.
+    expect(extensionsRequired).toEqual(
+      expect.arrayContaining(['EXT_meshopt_compression', 'KHR_texture_basisu']),
+    );
+  });
+
+  it('AC-15: its CREDITS row says it was converted', () => {
+    const [asset = ''] = creditsRows().get(SHEEN_CHAIR.model.path) ?? [];
+    expect(asset).toMatch(/converted: Meshopt \+ KTX2/);
+  });
+});

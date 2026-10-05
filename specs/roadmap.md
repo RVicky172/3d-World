@@ -36,11 +36,11 @@ _Goal: one renderer that can load, switch, and dispose Spaces; a gallery to pick
 
 _Goal: the "one object, many angles" experience._
 
-| #   | Feature                                                                             | Spec                        | Status |
-| --- | ----------------------------------------------------------------------------------- | --------------------------- | ------ |
-| 010 | Model viewer Space: load a GLB, auto-frame, turntable, environment lighting         | `features/010-model-viewer` | ✔️     |
-| 011 | Asset pipeline: GLB compression (Draco/Meshopt), KTX2 textures, loading progress UI | —                           | ⬜     |
-| 012 | Info panel: title, description, hotspots/annotations on the model                   | —                           | ⬜     |
+| #   | Feature                                                                       | Spec                          | Status |
+| --- | ----------------------------------------------------------------------------- | ----------------------------- | ------ |
+| 010 | Model viewer Space: load a GLB, auto-frame, turntable, environment lighting   | `features/010-model-viewer`   | ✔️     |
+| 011 | Asset pipeline: GLB compression (Meshopt), KTX2 textures, loading progress UI | `features/011-asset-pipeline` | ✔️     |
+| 012 | Info panel: title, description, hotspots/annotations on the model             | —                             | ⬜     |
 
 ## Phase 3 — Multi-Object Space: Solar System
 

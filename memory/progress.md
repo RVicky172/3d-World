@@ -11,6 +11,58 @@ Newest first. One entry per working session.
 
 ---
 
+## 2026-10-05 — 011-asset-pipeline ✔️ Implemented
+
+**Done:**
+
+- `/spec-verify 011`. DoD:
+  - `npm run check` ✅ (34 files, 475 unit);
+  - `npm run test:e2e` ✅ (99, ~44 s at 4 workers);
+  - `npm run build` ✅ (entry 145.6 KB gzipped, +0.8 KB of the 5 KB cap; sheen-chair 52.3 KB + 1.26 MB + 571.2 KB transcoder = 1.86 MB ≤ 5 MB; `__WORLD__` absent from production);
+  - a temporary probe (throttled load, keys, 3 round trips, lose/restore) logged no warnings or errors, and left 0 workers.
+- NFRs measured with temporary probes: time to model drawn at ~10 Mbit/s is 1.85 s compressed vs ≈ 3.4 s original (processing 255 vs 228 ms, plus transfer by bytes, since routed responses bypass CDP throttling). Longest main-thread task ~80 ms for both, so decoding doesn't freeze the page.
+- All 15 ACs ticked; spec Implemented; roadmap 011 ✔️; T092 ticked.
+- Coverage notes:
+  - AC-7 is proven in SwiftShader only (a device with few compressed formats); which format it transcoded to isn't asserted.
+  - AC-14's "same size twice" was verified by running `npm run assets` twice (same SHA-256), not by an automated test (the encoder takes ~8 s and isn't part of `npm run check`).
+  - AC-8's unknown-total fallback is unit-tested only (the preview server always sends Content-Length).
+
+**Next:** commit 011; then `/spec-new` 012.
+**Blockers:** none
+
+## 2026-10-05 — 011-asset-pipeline (spec → T002)
+
+**Done:**
+
+- 010 committed and pushed (`46b91c1`).
+- 011 spec drafted; Q1–Q5 answered (D-017: Meshopt only, ≤ 1.5 MB, ±10 % brightness, `assets-src/`, bar + % at 25/50/75, spike-set entry cap). Plan approved with five dev-only packages (D-018: glTF-Transform ×3, meshoptimizer, ktx2-encoder, chosen because `toktx` isn't installed). 23 tasks.
+- T001 spike: entry +0.2 KB → AC-6 cap 5 KB. three r186 KTX2Loader self-hosts `basis_transcoder.js/.wasm` through `new URL(…, import.meta.url)`: hashed build assets, listed in the chunk's manifest `assets`, and served from `node_modules` in dev. The chair's lazy chunk grows to ~52 KB gzipped.
+- T002: dev deps installed (0 vulnerabilities); original copied to `assets-src/sheen-chair/` with a README; `dist/` doesn't contain it. 379 unit + 90 E2E green.
+
+- T003 spike: ktx2-encoder works in Node (sharp as `imageDecoder`; declared as a dev dep, D-018 addendum, user approved). Full-size encode was 1.88 MB; the normal map (838 KB of UASTC) dominated. Chosen settings: ETC1S colour, UASTC+Zstd RDO 1 data maps, normal map capped at 512 px → **1.27 MB**, byte-identical across runs, ~10 s. Meshopt took geometry from 1 119 to 430 KB. The `ktx2()` transform swallows failures, so the pipeline must assert every texture is KTX2.
+
+- T010–T011: `src/core/progress.ts`: `clampProgress` (monotonic, [0, 1], null = unknown, non-finite ignored) and `announcementFor` (highest 25/50/75 step crossed; null previous counts as 0). 29 tests.
+- T020–T021: indicator `progress()`. It stays one `role=status`: the spoken label becomes `.visually-hidden` (a class change, so it isn't re-announced), and an `aria-hidden` "… 42 %" text plus a `role=progressbar` bar are added. The spoken text changes only at 25/50/75 %. The pulse stops once determinate; the bar doesn't ease under reduced motion. 010's tests are unchanged.
+- T022–T023: `SpaceContext.reportProgress?`, bound per request token in `SpaceManager`. Values from before the 250 ms show are kept (clamped) and applied on show; superseded, opened, failed and suspended requests are ignored. 423 unit + 90 E2E green.
+
+- T030–T031: `src/shared/model-viewer/loader.ts`, `createGltfLoader(renderer, parts?)`: FileLoader download ∥ `ktx2.init()` → `gltf.parseAsync`. KTX2 is set up with `detectSupport` and 2 workers, plus MeshoptDecoder; progress is reported as a fraction or null. The viewer's seam changed from `loader` to `createLoader`; it forwards progress to `ctx.reportProgress` and disposes the loader in a `finally` right after loading. Probe: no console warnings, 0 workers after 3 round trips + lose/restore (still the uncompressed GLB). 432 unit + 90 E2E green.
+
+- T040–T041: `scripts/asset-pipeline.mjs` (`validateManifest`, `textureMode`, `isColorTexture`, `maxSizeFor`, `checkOutput`) and `scripts/assets.config.mjs`. 30 tests, including the real manifest against the filesystem.
+- T042–T043: `scripts/build-assets.mjs` + `npm run assets`. Per-texture `encodeToKTX2` (sequential, so errors throw; encoder stdout muted), Meshopt `level: 'medium'`, `KHR_texture_basisu` required. The chair is now **1.26 MB**, deterministic. CREDITS notes the conversion and lists the Basis transcoder (Apache-2.0) and the Meshopt decoder (MIT). 464 unit + 90 E2E green on the compressed file; entry 145.5 KB.
+
+- T050–T051: the Space budget also counts files emitted by its lazy chunks (manifest `assets`, stored bytes, minus any the entry uses). The build prints code + assets + decoders = total. Chair: 1.86 MB of 5 MB. 468 unit tests green.
+
+- T060: `tests/e2e/asset-pipeline.spec.ts`: size ≤ 1.5 MB, parity with the original (served by route from `assets-src/`), transcoder same-origin, gallery fetches no decoder. Probes: mean brightness can't see lost textures (3.4 %), but the pixel diff can (compressed 0.33, untextured 5.47, noise 0.00). The user chose to add **pixel diff ≤ 2.0** to AC-2 and a **"<title> loaded"** announcement for AC-9 (D-019).
+- T024–T025: indicator `ready()`: a persistent `.loading-announcer` polite region (created on `show()`, cleared on the next show) says "<title> loaded". `SpaceManager.finishLoading()` calls it only after a shown, successful load. 475 unit + 94 E2E green.
+
+- T061–T062: progress E2E with CDP `Network.emulateNetworkConditions` (400 KB/s) and a MutationObserver log: 0→100, spoken steps exactly 25/50/75, then "loaded". Reduced-motion styles; blocked transcoder and corrupt GLB → "Failed to load" with no GLTFLoader texture errors; 10 round trips → memory baseline and 0 workers. Sabotages (no pre-init → untextured `opened`; no dispose → 22 workers) are caught. 475 unit + 99 E2E green.
+
+- T090: `architecture.md` gains an Asset Pipeline section and loader, progress, `ready()` and emitted-file budget notes, plus layout and seams. Fixed a stale `tech-stack.md` row (it still listed DRACOLoader and decoders in `public/`).
+- T091: 475 unit + 99 E2E + build green; entry 145.6 KB; chair 1.26 MB; Space 1.86 MB.
+
+**Next:** `/spec-verify 011`, then commit.
+**Blockers:** none
+
 ## 2026-10-05 — 010-model-viewer ✔️ Implemented
 
 **Done:**

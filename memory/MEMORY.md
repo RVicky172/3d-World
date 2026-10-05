@@ -4,15 +4,14 @@
 
 ## Current State (2026-10-05)
 
-- **Phase:** 2 (Single-Object Showcase) in progress: **010 ✔️**; 011 (asset pipeline) is next on the roadmap.
-- **Active feature:** none. Next: `/spec-new` for **011** (GLB compression with Draco/Meshopt, KTX2 textures, loading progress UI). Measure the entry again there: decoders/loaders may grow it (D-013 left ~105 KB headroom under 250 KB).
-- **Last done:** **010-model-viewer is Implemented** (2026-10-05), **not yet committed**:
-  - 14 ACs verified; 379 unit + 90 E2E; entry 144.8 KB gzipped (+9.9 KB, inside the ≤ 10 KB NFR, D-013).
-  - sheen-chair (CC0, D-014): 21.2 KB code + 3.93 MB GLB; shared viewer in `src/shared/model-viewer/`; loading indicator in `SpaceManager`.
-  - AC-5 clarified: the 10 % zoom-out floor is on the bounding sphere (D-016).
-  - Fixed a PMREM render-target texture leak (+1 GPU texture per visit) found by the AC-10 E2E.
-  - E2E workers capped at `min(4, cores/4)`, override `E2E_WORKERS` (D-015), after a full run crashed the machine.
-- **Next step:** commit 010 (`feat(010): model viewer Space`), then `/spec-new` 011.
+- **Phase:** 2 (Single-Object Showcase): **010 ✔️, 011 ✔️**; 012 (info panel: title, description, hotspots/annotations) is next on the roadmap.
+- **Active feature:** none. Next: `/spec-new` for **012**.
+- **Last done:** **011-asset-pipeline is Implemented** (2026-10-05), **not yet committed**:
+  - 15 ACs verified; 475 unit + 99 E2E (~44 s at 4 workers); entry 145.6 KB (+0.8 KB).
+  - Chair 4.1 → 1.26 MB (Meshopt + KTX2 via `npm run assets`; originals in `assets-src/`); Space 1.86 MB incl. the 571 KB transcoder.
+  - Download progress bar + %, spoken at 25/50/75 %, then "<title> loaded" (D-019); decoder failure → "Failed to load"; workers freed after load.
+  - Decisions D-017 (choices), D-018 (+ sharp addendum, tooling), D-019 (pixel-diff parity ≤ 2.0, "loaded" announcement).
+- **Next step:** commit 011 (`feat(011): asset pipeline`), then `/spec-new` 012. Measure the entry again in 012 (145.6 KB of 250 KB used).
 - **Blockers:** none
 
 ## Files

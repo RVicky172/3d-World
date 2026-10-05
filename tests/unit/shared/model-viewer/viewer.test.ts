@@ -12,6 +12,7 @@ import {
 } from 'three';
 import type { SpaceContext, SpaceInstance } from '../../../../src/core/types';
 import { createModelViewer, type ModelViewerDeps } from '../../../../src/shared/model-viewer';
+import type { ModelLoader } from '../../../../src/shared/model-viewer/loader';
 import { frameDistance } from '../../../../src/shared/model-viewer/framing';
 import type { ModelViewerConfig } from '../../../../src/shared/model-viewer/types';
 import { createFakeContext } from '../../../helpers/fakes';
@@ -50,7 +51,11 @@ describe('createModelViewer (spec 010)', () => {
   let ctx: SpaceContext;
   let model: ReturnType<typeof createModel>;
   let environment: Texture;
-  let deps: Required<Pick<ModelViewerDeps, 'loader' | 'createEnvironment' | 'baseUrl'>>;
+  let deps: Required<Pick<ModelViewerDeps, 'createLoader' | 'createEnvironment' | 'baseUrl'>>;
+  let loader: {
+    load: ReturnType<typeof vi.fn<ModelLoader['load']>>;
+    dispose: ReturnType<typeof vi.fn<() => void>>;
+  };
   let viewer: SpaceInstance;
 
   beforeEach(() => {
@@ -58,8 +63,12 @@ describe('createModelViewer (spec 010)', () => {
     document.body.append(ctx.canvas, ctx.overlay);
     model = createModel();
     environment = new Texture();
+    loader = {
+      load: vi.fn<ModelLoader['load']>(async () => ({ scene: model.group as Object3D })),
+      dispose: vi.fn<() => void>(),
+    };
     deps = {
-      loader: { loadAsync: vi.fn(async (_url: string) => ({ scene: model.group as Object3D })) },
+      createLoader: vi.fn(() => loader),
       createEnvironment: vi.fn(() => environment),
       baseUrl: '/base/',
     };
@@ -83,7 +92,25 @@ describe('createModelViewer (spec 010)', () => {
   describe('opening', () => {
     it('loads the model from the site base URL', async () => {
       await open();
-      expect(deps.loader.loadAsync).toHaveBeenCalledWith('/base/assets/test/chair.glb');
+      expect(deps.createLoader).toHaveBeenCalledWith(ctx.renderer);
+      expect(loader.load.mock.calls[0]?.[0]).toBe('/base/assets/test/chair.glb');
+    });
+
+    it('passes download progress to the loading indicator (spec 011, AC-8)', async () => {
+      const reported: Array<number | null> = [];
+      ctx.reportProgress = (fraction) => reported.push(fraction);
+      loader.load.mockImplementationOnce(async (_url, onProgress) => {
+        onProgress?.(0.5);
+        onProgress?.(null);
+        return { scene: model.group };
+      });
+      await open();
+      expect(reported).toEqual([0.5, null]);
+    });
+
+    it('frees the loader (and its decoder workers) as soon as the model has loaded (spec 011, AC-13)', async () => {
+      await open();
+      expect(loader.dispose).toHaveBeenCalledTimes(1);
     });
 
     it('centres the model on the origin (the controls focus point)', async () => {
@@ -176,14 +203,22 @@ describe('createModelViewer (spec 010)', () => {
 
   describe('failure (AC-9)', () => {
     it('rejects when the model cannot be loaded, having allocated nothing', async () => {
-      deps.loader.loadAsync = vi.fn(async () => {
-        throw new Error('404');
-      });
+      loader.load.mockRejectedValueOnce(new Error('404'));
 
       await expect(open()).rejects.toThrow('404');
+      expect(loader.dispose).toHaveBeenCalledTimes(1);
       expect(deps.createEnvironment).not.toHaveBeenCalled();
       expect(ctx.overlay.childElementCount).toBe(0);
       expect(ctx.canvas.hasAttribute('tabindex')).toBe(false);
+    });
+
+    it('rejects the same way when a decoder cannot be readied (spec 011, AC-12)', async () => {
+      loader.load.mockRejectedValueOnce(new Error('basis_transcoder.wasm 404'));
+
+      await expect(open()).rejects.toThrow('basis_transcoder.wasm 404');
+      expect(loader.dispose).toHaveBeenCalledTimes(1);
+      expect(deps.createEnvironment).not.toHaveBeenCalled();
+      expect(ctx.overlay.childElementCount).toBe(0);
     });
   });
 });
