@@ -56,6 +56,7 @@ export function createFakeContext(overrides: Partial<SpaceContext> = {}): SpaceC
     overlay: document.createElement('div'),
     reducedMotion: false,
     signal: new AbortController().signal,
+    startTime: Date.UTC(2026, 9, 5), // fixed "today" (spec 021)
     ...overrides,
   };
 }

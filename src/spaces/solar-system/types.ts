@@ -24,6 +24,35 @@ export interface OrbitalElements {
   /** Reference plane of the angles. */
   plane: 'ecliptic' | 'laplace';
   epoch: 'J2000';
+  /** Planets: how each element changes per Julian century (JPL Table 1, valid 1800–2050). */
+  ratesPerCentury?: ElementRates;
+  /** Moons: years for the periapsis to advance a full turn (0 = none given). */
+  apsisPeriodYears?: number;
+  /** Moons: years for the node to regress a full turn (0 = none given). */
+  nodePeriodYears?: number;
+}
+
+/** Per Julian century (JPL Table 1). */
+export interface ElementRates {
+  semiMajorAxisKm: number;
+  eccentricity: number;
+  inclinationDeg: number;
+  meanLongitudeDeg: number;
+  perihelionLongitudeDeg: number;
+  ascendingNodeDeg: number;
+}
+
+/**
+ * Spin, from NAIF's PCK (IAU): the north pole in J2000 equatorial coordinates and the prime meridian angle
+ * `W = W0 + Ẇ·d` (d = days since J2000). A negative Ẇ is a backwards spin. Only the constant and linear terms
+ * are kept (NAIF's small precession terms for Neptune, Triton, the Moon and the Galileans are left out).
+ */
+export interface Rotation {
+  /** [value, change per Julian century], degrees. */
+  poleRaDeg: [number, number];
+  poleDecDeg: [number, number];
+  /** [W0, Ẇ per day], degrees. */
+  primeMeridianDeg: [number, number];
 }
 
 export interface BodyData {
@@ -45,6 +74,8 @@ export interface BodyData {
   orbit: OrbitalElements | null;
   /** Representative colour until 022's textures. */
   colour: number;
+  /** Spin axis and phase (021). */
+  rotation: Rotation;
   /** Fixed angle on its orbit until 021 adds motion (Q1), in degrees, 0–360. */
   displayAngleDeg: number;
 }
@@ -56,7 +87,7 @@ export interface DataSource {
   licence: string;
   /** ISO date the values were read. */
   read: string;
-  covers: Array<'physical' | 'planet-orbits' | 'moon-orbits'>;
+  covers: Array<'physical' | 'planet-orbits' | 'moon-orbits' | 'rotation'>;
 }
 
 /** Per body, in scene units: distance from its parent's centre, and display radius. */

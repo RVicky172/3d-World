@@ -11,6 +11,43 @@ Newest first. One entry per working session.
 
 ---
 
+## 2026-10-06 — 021-orbital-mechanics ✔️ Implemented
+
+**Done:**
+
+- Spec Q1–Q9 answered (D-025); plan approved; 20 tasks.
+- T001: entry-size spike +0.0 KB (`LineLoop`, `LineBasicMaterial`, `Quaternion` already shared).
+- T002: `scripts/horizons.mjs` (pure, 4 tests) + `fetch-reference-positions.mjs`; fixture of 15 bodies × 7 dates (first date 1800-01-03: no Neptune ephemeris earlier).
+- T010: element rates, NAIF poles/prime meridians, moon apsis/node periods (lead-approved). The cross-check caught Mars's pole 1.3° off (71 000-year term folded in at J2000).
+- T011: `time.ts` (clock in days since J2000, four speeds, direction, 1800–2050 clamp that pauses and reports once, UTC `formatDate`/`isoDate`, `initialTime`). 672 unit green.
+
+- T013 started (draft `src/spaces/solar-system/orbit.ts`, no tests yet): planets within 0.17° and 0.13 % of Horizons at all 7 dates. **Moons miss 10° (plan risk → stopped):** with the JPL table as stored, Io/Europa/Ganymede/Callisto are right at J2000 but drift to 90–175°; Titan is ~160° off at every date; the Moon is 10.4° off in 1800; Triton 45–151°. Measured fixes: mean-longitude rate = NAIF |Ẇ| → Moon and Galileans ≤ 2.1°; Titan's epoch angle from Horizons → ≤ 3.5°; Triton still 2–29° under every convention. Scratch measurements kept outside the repo.
+- Lead chose the fixes + a 30° Triton allowance (D-026; spec AC-3 and plan §3 amended). T012: `orbit.test.ts` (36 tests: planets vs fixture, ellipse shape, moons vs fixture and direction and period, spin period/tilt/backwards/facing/fast-spin hold, frames, no allocation). T013: `orbit.ts` finished; Titan's M 11.7° → 213.3°. Worst errors: planets 0.17°/0.13 %, Moon 1.4°, Galileans 2.1°, Titan 5.2°, Triton 25.1°.
+
+- T014: `scale.ts` `createPlacement(bodies).at(layout, mode, days)`: real = orbit maths ÷ 10⁶ km, stylised = 020 ring at the true XZ angle; same objects every call; no overlap at 200 seeded random dates (sabotage-checked).
+- T020: `scene.ts` `applyPositions()` / `applyOrientations()`. 715 unit green.
+
+- T021: `orbit-lines.ts` (15 line loops per scale, prebuilt, visibility toggle, in-place refresh, no raycast). D-027: moon lines refresh after 1 % of their precession (the 10-year rule left the Moon 5.4 % off). 723 unit green.
+
+- T022: controls `follow(delta)` (camera + target move together; not an interaction; the frame's update clamps). 726 unit + 145 E2E green.
+
+- T023: core seams: `SpaceContext.startTime` (manager `wallClock`, main passes `Date.now`), `saveState()` → `savedState` on resume only (kept through a loss mid-rebuild), `__WORLD__.simTime()`/`setSimTime()`. 734 unit + 145 E2E green.
+
+- T030: `time-controls.ts`: "Time" group, `<time datetime>` date (not live), Play/Pause time, Speed select, Backwards toggle, polite announcements for play/pause, direction and range limits; silent `set()`. 748 unit green.
+
+- T031–T032: Space wiring: time (start time, reduced motion, controls, range limit, saved state), per-date positions/orientations/orbit lines, follow after a re-centre (stops on pan/reset/scale switch), `simTime`/`setSimTime`; `.solar-bar` layout; screenshots at 3 sizes clean. D-028 (ambient 0.1 for night sides; saved state = time only). 765 unit + 145 E2E green; entry 146.6 KB.
+
+- T040: `solar-system-time.spec.ts` controls (7 tests: mouse, keyboard, touch, date, today, 2050 limit, reduced motion).
+- T041: motion E2E (4 tests: spin and fast-spin hold, markers on moving bodies, follow + pan, Neptune's path drawn at both scales). Found and fixed markers lagging moving bodies under a still camera (`markers.invalidate()`); `bodies()` reports quaternions. 766 unit + 156 E2E green.
+
+- T042: lifecycle E2E (context loss keeps time paused or playing; fresh visit starts today at 1 week/s; round trips with time running back to baseline). 766 unit + 159 E2E green.
+
+- T090: architecture updated for 021 (contract, core seams, `follow`, Solar System motion, seams, Tab order).
+- T091–T092 (`/spec-verify 021`): 766 unit + 159 E2E, build OK; entry 146.6 KB (+0.1); Space 17.3 KB; gate-5 probe clean (production build, E2E flags); 60.2 fps under SwiftShader (renderer string in `tasks.md`). All 13 ACs ticked; spec Implemented; roadmap 021 ✔️.
+
+**Next:** commit 021 when asked; then `/spec-new` for 022 (planet textures, Saturn rings, starfield, Sun glow).
+**Blockers:** none
+
 ## 2026-10-05 — 020-solar-system-data ✔️ Implemented
 
 **Done:**
@@ -42,7 +79,10 @@ Newest first. One entry per working session.
 - T091: full gate green; entry 146.5 KB; Space 12.7 KB; gate-5 probe clean; 60.3 fps in SwiftShader (software floor; logged the renderer string).
 - T092: all 14 ACs ticked; spec Implemented; roadmap 020 ✔️.
 
-**Next:** commit 020 when asked; then `/spec-new 021`.
+- Committed and pushed: `dbd4882` (012) and `601c597` (020).
+- 021 spec drafted (13 ACs, Q1–Q9 open).
+
+**Next:** the lead answers 021's Q1–Q9 → `/spec-plan 021`.
 **Blockers:** none
 
 ## 2026-10-05 — 012-info-panel ✔️ Implemented

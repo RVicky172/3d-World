@@ -141,4 +141,21 @@ describe('installDebugHook', () => {
       expect(target.__WORLD__?.cameraProjection()).toBeNull();
     });
   });
+
+  it('reads and sets the active Space’s simulated time, when it has one (spec 021)', () => {
+    installDebugHook(target, deps, 'test');
+    const world = target.__WORLD__!;
+    expect(world.simTime()).toBeNull();
+    expect(() => world.setSimTime(10)).not.toThrow();
+
+    const setSimTime = vi.fn<(days: number) => void>();
+    deps.engine.instance = {
+      ...instanceWith(new PerspectiveCamera()),
+      simTime: () => ({ days: 9400, speed: 7, playing: true }),
+      setSimTime,
+    };
+    expect(world.simTime()).toEqual({ days: 9400, speed: 7, playing: true });
+    world.setSimTime(18_500);
+    expect(setSimTime).toHaveBeenCalledWith(18_500);
+  });
 });

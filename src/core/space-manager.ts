@@ -52,6 +52,8 @@ export interface SpaceManagerOptions {
    * title and description once its factory has built the view, and disposed with the view. Not for the gallery.
    */
   infoPanel?: (overlay: HTMLElement, info: { title: string; description: string }) => { dispose(): void };
+  /** Read at each open for `SpaceContext.startTime` (spec 021). Defaults to `Date.now`; tests pass a constant. */
+  wallClock?: () => number;
 }
 
 interface Mounted {
@@ -93,6 +95,12 @@ export class SpaceManager {
   private readonly loading: LoadingIndicator | null;
   private readonly infoPanel: SpaceManagerOptions['infoPanel'] | null;
   private readonly loadingDelayMs: number;
+  private readonly wallClock: () => number;
+  /**
+   * The current target's state from before a context loss (spec 021, AC-12): set by `suspend()` from the mounted
+   * view, handed to the next `resume()`, kept while that rebuild is in flight, dropped by any other request.
+   */
+  private savedState: unknown = undefined;
   /** The request whose loading timer is pending or whose indicator is showing, and its latest progress. */
   private loadingFor: {
     token: number;
@@ -113,6 +121,7 @@ export class SpaceManager {
     this.loading = options.loading ?? null;
     this.infoPanel = options.infoPanel ?? null;
     this.loadingDelayMs = options.loadingDelayMs ?? LOADING_DELAY_MS;
+    this.wallClock = options.wallClock ?? Date.now;
   }
 
   /** Id of the mounted registry Space; null on the gallery or when nothing is mounted. */
@@ -141,6 +150,7 @@ export class SpaceManager {
   async close(): Promise<void> {
     ++this.sequence;
     this.target = null;
+    this.savedState = undefined;
     this.stopLoading();
     this.clearStatus();
     delete this.status.dataset.view;
@@ -155,6 +165,8 @@ export class SpaceManager {
    */
   suspend(): void {
     ++this.sequence;
+    // With nothing mounted (a loss mid-load), keep what the interrupted rebuild was carrying.
+    if (this.mounted) this.savedState = saveStateOf(this.mounted);
     this.stopLoading();
     this.clearStatus();
     clearMessage(this.engine.overlay);
@@ -165,12 +177,18 @@ export class SpaceManager {
   async resume(): Promise<OpenResult | null> {
     if (!this.target) return null;
     const { view, id, source } = this.target;
-    return this.mount(view, id, source);
+    return this.mount(view, id, source, this.savedState);
   }
 
-  private async mount(view: ViewName, id: string | null, source: FactorySource): Promise<OpenResult> {
+  private async mount(
+    view: ViewName,
+    id: string | null,
+    source: FactorySource,
+    savedState?: unknown,
+  ): Promise<OpenResult> {
     const token = ++this.sequence;
     this.target = { view, id, source };
+    this.savedState = savedState;
     const isStale = () => token !== this.sequence;
     const label = id ?? view;
     this.stopLoading(); // a newer request replaces any indication for an older one
@@ -186,7 +204,7 @@ export class SpaceManager {
     const title = id === null ? view : (findSpace(id, this.registry)?.title ?? id);
     this.startLoading(token, title);
     try {
-      return await this.build(token, view, id, label, source);
+      return await this.build(token, view, id, label, source, savedState);
     } finally {
       this.stopLoading(token);
     }
@@ -198,6 +216,7 @@ export class SpaceManager {
     id: string | null,
     label: string,
     source: FactorySource,
+    savedState: unknown,
   ): Promise<OpenResult> {
     const isStale = () => token !== this.sequence;
     let factory: SpaceFactory;
@@ -224,6 +243,8 @@ export class SpaceManager {
         reducedMotion: this.reducedMotion(),
         signal: controller.signal,
         reportProgress: (fraction) => this.reportProgress(token, fraction),
+        startTime: this.wallClock(),
+        ...(savedState === undefined ? {} : { savedState }),
       });
     } catch (error) {
       if (isStale()) return 'superseded';
@@ -330,6 +351,16 @@ export class SpaceManager {
     delete this.status.dataset.spaceReady;
     delete this.status.dataset.spaceId;
     delete this.status.dataset.spaceStatus;
+  }
+}
+
+/** A view's state for after a context loss; a throwing `saveState()` is logged and the view restarts fresh. */
+function saveStateOf({ label, instance }: Mounted): unknown {
+  try {
+    return instance.saveState?.();
+  } catch (error) {
+    console.error(`Space "${label}" threw during saveState()`, error);
+    return undefined;
   }
 }
 

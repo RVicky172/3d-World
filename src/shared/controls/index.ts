@@ -226,6 +226,15 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
     setHome,
     turnTo,
     focusOn,
+    follow({ x, y, z }) {
+      // No update here: it would flush the visitor's damping each frame. The frame's update() clamps.
+      orbit.target.x += x;
+      orbit.target.y += y;
+      orbit.target.z += z;
+      camera.position.x += x;
+      camera.position.y += y;
+      camera.position.z += z;
+    },
     holdTurntable(hold) {
       turntable.hold(hold);
       if (hold) orbit.autoRotate = false;

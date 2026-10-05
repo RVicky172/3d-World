@@ -726,10 +726,99 @@ body[data-view='gallery'] .back-to-gallery {
  * Solar system (spec 020). The scale toggle sits on the controls row, bottom-left (this Space has no model
  * credit). Real-scale name markers are labels only: they let every pointer event through to the 3D view.
  */
-.scale {
+/*
+ * Spec 021: "True scale" and the time controls share one row at bottom-left, the date above the time buttons.
+ * The row leaves room for the controls bar at bottom-right.
+ */
+.solar-bar {
   position: absolute;
   bottom: 16px;
   left: 16px;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: calc(100% - 200px);
+  /* Only the controls catch pointers: drags elsewhere in the row reach the 3D view. */
+  pointer-events: none;
+}
+
+.solar-bar > * {
+  pointer-events: auto;
+}
+
+.time-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.time-date {
+  flex-basis: 100%;
+  padding-left: 4px;
+  color: var(--fg);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 3px var(--bg);
+}
+
+.time-controls button,
+.time-controls select {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.time-controls button:hover,
+.time-controls select:hover {
+  border-color: var(--accent);
+}
+
+.time-direction[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--surface-inset);
+}
+
+.time-controls button:focus-visible,
+.time-controls select:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* The first-use hint sits above the date row. */
+.overlay:has(.solar-bar) .controls-hint {
+  bottom: 120px;
+}
+
+@media (max-width: 640px) {
+  /* Time controls on their own row above "True scale" and the controls bar; the info sheet lifted above them. */
+  .solar-bar {
+    right: 16px;
+    flex-direction: column-reverse;
+    align-items: flex-start;
+    max-width: none;
+  }
+
+  .time-date {
+    flex-basis: auto;
+  }
+
+  /* The bar is ~148 px tall here (date + Play, speed + Backwards, "True scale"). */
+  .overlay:has(.solar-bar) .info {
+    bottom: 180px;
+  }
+
+  /* The hint stays below the back link, as on every narrow Space. */
+  .overlay:has(.solar-bar) .controls-hint {
+    bottom: auto;
+  }
 }
 
 .scale-toggle {

@@ -1,4 +1,5 @@
 import { REAL_UNIT_KM, STYLISED } from './data';
+import { moonPosition, planetPosition, toScene, type Vector3Like } from './orbit';
 import type { BodyData, BodyLayout, ScaleMode } from './types';
 
 type Vec3 = [number, number, number];
@@ -107,4 +108,43 @@ export function systemExtent(bodies: readonly BodyData[], layoutOf: Map<string, 
     extent = Math.max(extent, Math.hypot(x, y, z) + layoutOf.get(id)!.radius);
   }
   return extent;
+}
+
+/**
+ * Each body's offset from its parent on a date, in scene units (spec 021, AC-2/AC-5, Q3):
+ * - **Real:** the orbit maths (true ellipses) ÷ `REAL_UNIT_KM`.
+ * - **Stylised:** on its 020 ring, at the angle of its true offset projected on the XZ plane, so the rings stay
+ *   disjoint at every date and the angles are true.
+ *
+ * `at()` writes into the same map and vectors every call (no allocation per frame).
+ */
+export function createPlacement(bodies: readonly BodyData[]): {
+  at(layoutOf: Map<string, BodyLayout>, mode: ScaleMode, days: number): Map<string, Vector3Like>;
+} {
+  const offsets = new Map<string, Vector3Like>(bodies.map((b) => [b.id, { x: 0, y: 0, z: 0 }]));
+  const parents = new Map(bodies.map((b) => [b.id, bodies.find((p) => p.id === b.parent)]));
+  return {
+    at(layoutOf, mode, days) {
+      for (const b of bodies) {
+        const out = offsets.get(b.id)!;
+        const parent = parents.get(b.id);
+        if (b.kind === 'moon' && parent) moonPosition(b, parent, days, out);
+        else planetPosition(b, days, out); // the Sun (no orbit) → origin
+        toScene(out);
+        if (mode === 'real') {
+          out.x /= REAL_UNIT_KM;
+          out.y /= REAL_UNIT_KM;
+          out.z /= REAL_UNIT_KM;
+        } else if (b.parent) {
+          const { distance } = layoutOf.get(b.id)!;
+          const length = Math.hypot(out.x, out.z);
+          // A body exactly above or below its parent (never at these inclinations) keeps the +X direction.
+          out.x = length > 0 ? (out.x / length) * distance : distance;
+          out.z = length > 0 ? (out.z / length) * distance : 0;
+          out.y = 0;
+        }
+      }
+      return offsets;
+    },
+  };
 }

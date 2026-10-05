@@ -155,6 +155,16 @@ describe('createBodyMarkers', () => {
     observer.disconnect();
   });
 
+  it('follows bodies that moved under a still camera once invalidated (021: time moves them)', () => {
+    create();
+    positions.get('earth')!.set(-5, 0, 0);
+    markers.update();
+    expect(at(marker('earth')).x).toBeCloseTo(300, 1); // the camera didn't move: skipped
+    markers.invalidate();
+    markers.update();
+    expect(at(marker('earth')).x).toBeCloseTo(100, 1);
+  });
+
   it('nearest() finds the body whose projected centre is closest within the radius (D-023)', () => {
     create();
     expect(markers.nearest(306, 202, 24)).toBe('moon'); // Earth at 300, the Moon at 310: the Moon is nearer

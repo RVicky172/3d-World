@@ -217,3 +217,71 @@ Format:
 **Decision (project lead):** Where two names would overlap, the larger body keeps its name and the other shows only its dot (its name returns once there's room, e.g. after zooming in). A name that would run past the view's right edge sits left of its dot. The moon rule (hidden within 24 px of its planet) stays.
 **Alternatives:** Leave it for 023, which reworks labels with selection.
 **Consequences:** `markers.ts` gets a greedy pass by body size over estimated label boxes (from name length; no layout reads per frame). AC-8a amended (spec Changelog).
+
+## D-025 — Orbital motion and time choices for 021 (2026-10-05)
+
+**Context:** Spec 021 open questions Q1–Q9.
+**Decision (project lead):**
+
+1. The Solar System opens at **today's date**; the core passes the wall-clock date in (Space logic never reads the clock).
+2. Speeds: 1 day, 1 week, 1 month, 1 year per second, **forwards or backwards**; default **1 week/s** forwards.
+3. Stylised scale keeps 020's **circular rings**, with each body at its true angle for the date.
+4. A view re-centred on a body (D-023) **follows** it while time runs, until the visitor pans, resets or re-centres.
+5. Every orbit is drawn as a **faint line, at both scales**.
+6. Spin faster than **one turn per second** of real time is held still instead of strobing.
+7. Time stays within **1800–2050** (the elements' validity) and pauses at a limit, saying so.
+8. Time settings are **not remembered** across visits; only the scale is.
+9. The entry-growth cap is **≤ 5 KB gzipped**.
+
+**Alternatives:** J2000 or another fixed start; forward-only or other speeds; scaled ellipses at stylised scale; a camera that stays put; real-scale-only or no orbit lines; always-true or capped spin; a wider date range; remembering time state; a 3 KB cap.
+**Consequences:** `SpaceContext` gains a start date from the core (the first wall-clock value given to a Space). The motion code needs a reference table of JPL positions for its accuracy tests (read at dev time). Following a body extends the controls' focus. Orbit lines add geometry per orbit (~15 line loops).
+
+## D-026 — Moon motion corrections and Triton's allowance (021, 2026-10-05)
+
+**Context:** T013 measured the moons against Horizons positions at 7 dates (1800–2050). Propagating JPL's satellite mean-elements table as given missed AC-3's 10° badly: the Galileans drift to 90–175° (the table's `P` isn't their mean motion: Io 204.23°/d vs the true 203.49°/d), Titan is ~160° off at every date (its epoch angle disagrees with Horizons: osculating M 163.4° vs the table's 11.7°), the Moon is 10.4° off in 1800, Triton 45–151°.
+**Decision (project lead):** Mean-longitude rates come from each moon's NAIF synchronous spin rate `|Ẇ|` (already in the data). Titan's epoch mean anomaly becomes 213.3°, fitted to Horizons' J2000 vector. Node precession advances for retrograde orbits (physically, Ω̇ ∝ −cos i), and the argument of latitude advances at `n ∓ Ω̇` by the sign of cos i (mean longitude Ω ± (ω + M)). AC-3 allows **30° for Triton only**; the other six moons stay at 10°.
+**Alternatives:** Research a precession term from Triton's source to reach 10° (deferred; 30° is enough for the visual); loosen AC-3 for every moon (Io would sit on the wrong side of Jupiter).
+**Consequences:** Measured worst errors: Moon 1.4°, Galileans 2.1°, Titan 5.2°, Triton 25.1° (1850); planets 0.17°. Titan's data value is fitted to the J2000 reference date, so its other 6 dates are the independent check. Spec AC-3 and plan §3 amended.
+
+## D-027 — Moon orbit lines refresh with their precession (021, 2026-10-05)
+
+**Context:** Plan §5 rebuilt the real-scale ellipses once the date moved 10 years. That suits the planets, but the Moon's ellipse turns a full circle every ~6 years (e = 0.055): after 9 years its line was 5.4 % of its orbit away from the Moon, against AC-11's "matching the path its body travels".
+**Decision:** Each real line has its own refresh interval: 10 years for planets; for a moon, 1 % of its fastest apsis or node period (the Moon ~22 days, Io ~5 days, Triton ~3.4 years). A refresh rewrites the line's existing buffer (256 Kepler solves), so no geometry is created. Plan detail only; the spec is unchanged.
+**Alternatives:** Rebuild every line every frame (wasteful); accept the drift (visible when zoomed to Earth at real scale).
+**Consequences:** The Moon stays within 0.5 % of its orbit of its line; at 1 year/s it refreshes ~17 times a second (~256 solves each, negligible).
+
+## D-028 — Solar System wiring details (021 T032, 2026-10-05)
+
+**Context:** Wiring time into the Space surfaced three details the plan left open or got wrong.
+**Decision:**
+
+1. **Ambient light 0.03 → 0.1.** With real positions, an inner planet between the camera and the Sun shows its night side; at 0.03 it rendered ~10/255 against the black background and Mercury vanished at today's date (020 AC-5's E2E caught it). At 0.1 night sides read ~26/255, still far darker than the lit side (020 AC-10 test passes).
+2. **Saved state is the time only** (`{ time }`), not `followId` (plan §2): after a context loss the camera is back home, so resuming a follow would swing the view to a body the visitor no longer looks at. AC-12 asks for date, speed and play state only.
+3. **One `.solar-bar` row** holds "True scale" and the time controls (flex; wraps on narrow screens), instead of two independently positioned boxes. Tab order unchanged.
+   **Alternatives:** (1) Accept invisible new-phase planets, or relax the E2E check; (2) restore follow with a focusOn on resume; (3) fixed offsets per control.
+   **Consequences:** Night sides are a little brighter. Plan §2 amended.
+
+## D-029 — Solar System surfaces choices for 022 (2026-10-06)
+
+**Context:** Spec 022 open questions Q1–Q9.
+**Decision (project lead):**
+
+1. **All 16 bodies** get surface imagery (Sun, planets, moons).
+2. **Source:** public-domain NASA/USGS maps first; CC-BY 4.0 with attribution where none fits.
+3. **Budget:** ~3 MB for imagery and star data; 2K maps for the planets, 1K for the Sun, moons and Earth's extra layers.
+4. **Earth extras:** a cloud layer, night-side city lights and ocean shine.
+5. **Rings:** Saturn only, with Saturn's shadow on the rings and the rings' shadow on Saturn.
+6. **Stars:** a real catalogue to about magnitude 6.5, true positions and brightness (no share-alike licences).
+7. **Sun glow:** a static halo.
+8. **Loading:** the Space opens at once in plain colours; imagery fades in as it arrives (instant under reduced motion).
+9. **Entry cap:** ≤ 5 KB gzipped.
+
+**Alternatives:** fewer textured bodies; a single CC-BY set; 1K or 4K maps; no Earth extras; all ring systems or no shadows; a random star field or a Milky Way image; an animated glow; waiting for all imagery before opening; a 2 KB cap.
+**Consequences:** Earth needs its own material (layers blended by sunlight); Saturn's ring and body need shadow terms in their shaders; a star catalogue becomes a data asset; the Space reports imagery progress after it has opened.
+
+## D-030 — 022 plan approved: Space budget and committed source maps (2026-10-06)
+
+**Context:** The bundle check counts each lazy chunk's emitted files, including the 0.57 MB Basis transcoder that the KTX2 loader brings (already shipped for the chair). With ~3 MB of imagery the Solar System would total ~3.6 MB, over 022 AC-13's 3.5 MB. The plan also had to choose where the source maps live.
+**Decision (project lead):** AC-13's Space total is **≤ 4 MB including the shared decoder**; imagery and star data stay ≤ 3 MB. Source maps are **committed** at shipping resolution (~10 MB, JPEG q95) in `assets-src/solar-system/`. Plan approved.
+**Alternatives:** keep 3.5 MB and shrink the imagery to ~2.9 MB; commit only the fetch script.
+**Consequences:** Spec AC-13 amended (changelog). The repository grows by ~10 MB of source imagery.

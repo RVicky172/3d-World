@@ -19,7 +19,16 @@ export interface WorldDebugApi {
   /** The active Space's hotspot world positions in data order, or [] (spec 012, AC-6). */
   hotspots(): Array<{ id: string; world: [number, number, number] }>;
   /** The active Space's bodies (world position, drawn radius), or [] (spec 020). */
-  bodies(): Array<{ id: string; world: [number, number, number]; radius: number }>;
+  bodies(): Array<{
+    id: string;
+    world: [number, number, number];
+    radius: number;
+    quaternion?: [number, number, number, number];
+  }>;
+  /** The active Space's simulated time, or null (spec 021): days since J2000, speed in days/s. */
+  simTime(): { days: number; speed: number; playing: boolean } | null;
+  /** Jumps the active Space to a simulated date, if it has one (spec 021). */
+  setSimTime(days: number): void;
   /** Simulates a GPU context loss (spec 005). Call `restoreContext()` only after `data-webgl="lost"`. */
   loseContext(): void;
   restoreContext(): void;
@@ -84,6 +93,8 @@ export function installDebugHook(
     },
     hotspots: () => engine.instance?.hotspotPositions?.() ?? [],
     bodies: () => engine.instance?.bodies?.() ?? [],
+    simTime: () => engine.instance?.simTime?.() ?? null,
+    setSimTime: (days) => engine.instance?.setSimTime?.(days),
     cameraAspect: () => {
       const camera = engine.instance?.camera;
       return camera instanceof PerspectiveCamera ? camera.aspect : null;

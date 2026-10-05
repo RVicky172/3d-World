@@ -18,6 +18,8 @@ export interface BodyMarkers {
   resize(width: number, height: number): void;
   /** Call once per frame, after the camera moved and its matrices are current. */
   update(): void;
+  /** The bodies moved (spec 021): the next `update()` re-projects even if the camera didn't move. */
+  invalidate(): void;
   /** The body whose projected centre is nearest (x, y) within `radius` CSS px, or null; null while inactive. */
   nearest(x: number, y: number, radius: number): string | null;
   dispose(): void;
@@ -121,6 +123,9 @@ export function createBodyMarkers(options: {
       height = h;
       stale = true;
       needsMeasure = true;
+    },
+    invalidate() {
+      stale = true;
     },
     update() {
       if (disposed || !active || width === 0 || height === 0) return;

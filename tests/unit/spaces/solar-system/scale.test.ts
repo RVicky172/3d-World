@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { PerspectiveCamera, Vector3 } from 'three';
 import { BODIES, REAL_UNIT_KM, SOLAR_SYSTEM } from '../../../../src/spaces/solar-system/data';
-import { layout, placeBodies, systemExtent, worldPositions } from '../../../../src/spaces/solar-system/scale';
+import { moonPosition, planetPosition, toScene } from '../../../../src/spaces/solar-system/orbit';
+import { RANGE } from '../../../../src/spaces/solar-system/time';
+import {
+  createPlacement,
+  layout,
+  placeBodies,
+  systemExtent,
+  worldPositions,
+} from '../../../../src/spaces/solar-system/scale';
 import { frameDistance } from '../../../../src/shared/model-viewer/framing';
 import type { BodyData } from '../../../../src/spaces/solar-system/types';
 
@@ -129,5 +137,77 @@ describe('placing bodies', () => {
     const neptune = real.get('neptune')!.distance;
     expect(systemExtent(BODIES, real)).toBeGreaterThan(neptune);
     expect(systemExtent(BODIES, real)).toBeLessThan(neptune + 1);
+  });
+});
+
+// Spec 021, AC-2/AC-5 (plan §4, Q3): positions for a date. Real: the orbit maths ÷ REAL_UNIT_KM. Stylised: on
+// the 020 ring, at the true angle around the parent.
+describe('placing bodies on a date (021)', () => {
+  const styl = layout(BODIES, 'stylised');
+  const real = layout(BODIES, 'real');
+  const truth = (b: BodyData, days: number) => {
+    const out = new Vector3();
+    if (b.kind === 'planet') planetPosition(b, days, out);
+    if (b.kind === 'moon') moonPosition(b, byId.get(b.parent!)!, days, out);
+    return toScene(out) as Vector3;
+  };
+
+  it('real: each body sits at its true offset from its parent, in scene axes, ÷ REAL_UNIT_KM', () => {
+    const placement = createPlacement(BODIES);
+    for (const days of [-73_000, 0, 9_400]) {
+      const offsets = placement.at(real, 'real', days);
+      for (const b of BODIES) {
+        const expected = truth(b, days).divideScalar(REAL_UNIT_KM);
+        const { x, y, z } = offsets.get(b.id)!;
+        expect(new Vector3(x, y, z).distanceTo(expected), `${b.id} ${days}`).toBeLessThan(1e-9);
+      }
+    }
+  });
+
+  it('stylised: each body stays on its 020 ring, in the XZ plane, at its true angle around its parent', () => {
+    const placement = createPlacement(BODIES);
+    for (const days of [-73_000, 0, 9_400]) {
+      const offsets = placement.at(styl, 'stylised', days);
+      for (const b of BODIES.filter((x) => x.parent)) {
+        const { x, y, z } = offsets.get(b.id)!;
+        expect(Math.hypot(x, z), b.id).toBeCloseTo(styl.get(b.id)!.distance, 9);
+        expect(y, b.id).toBe(0);
+        const t = truth(b, days);
+        expect(Math.atan2(z, x), `${b.id} ${days}`).toBeCloseTo(Math.atan2(t.z, t.x), 9);
+      }
+    }
+  });
+
+  it('keeps the Sun at the origin and writes into the same objects every call', () => {
+    const placement = createPlacement(BODIES);
+    const first = placement.at(styl, 'stylised', 0);
+    const earth = first.get('earth');
+    const second = placement.at(real, 'real', 500);
+    expect(second).toBe(first);
+    expect(second.get('earth')).toBe(earth);
+    expect(Object.values(second.get('sun')!).map((n) => n + 0)).toEqual([0, 0, 0]); // −0 → 0
+  });
+
+  it('stylised: nothing overlaps at 200 random dates in the range (020 AC-5 at every date)', () => {
+    const placement = createPlacement(BODIES);
+    let seed = 21;
+    const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646; // deterministic
+    for (let n = 0; n < 200; n++) {
+      const days = RANGE.start + random() * (RANGE.end - RANGE.start);
+      const offsets = placement.at(styl, 'stylised', days);
+      const world = new Map<string, Vector3>();
+      for (const b of BODIES) {
+        const { x, y, z } = offsets.get(b.id)!;
+        world.set(b.id, new Vector3(x, y, z).add(b.parent ? world.get(b.parent)! : new Vector3()));
+      }
+      for (const a of BODIES) {
+        for (const b of BODIES) {
+          if (a.id >= b.id) continue;
+          const gap =
+            world.get(a.id)!.distanceTo(world.get(b.id)!) - styl.get(a.id)!.radius - styl.get(b.id)!.radius;
+          expect(gap, `${a.id}–${b.id} on day ${days.toFixed(1)}`).toBeGreaterThan(0);
+        }
+      }
+    }
   });
 });

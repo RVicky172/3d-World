@@ -10,6 +10,7 @@ import {
 } from 'three';
 import { disposeObject3D } from '../../shared/dispose';
 import { SOLAR_SYSTEM } from './data';
+import { orientation, type Vector3Like } from './orbit';
 import { placeBodies } from './scale';
 import type { BodyData, BodyLayout } from './types';
 
@@ -18,6 +19,10 @@ export interface SolarSystemScene {
   root: Group;
   /** Moves each orbit group to its offset and scales each mesh to its radius: no new geometry (AC-8). */
   applyLayout(layout: Map<string, BodyLayout>): void;
+  /** Moves each orbit group to its offset from its parent (021, from `createPlacement`); updates world matrices. */
+  applyPositions(offsets: Map<string, Vector3Like>): void;
+  /** Turns each mesh to its orientation on the date (021, AC-4): spin, tilt, moons facing their planet. */
+  applyOrientations(days: number, speedDaysPerSecond: number): void;
   /** The body's mesh, by id. */
   mesh(id: string): Mesh;
   dispose(): void;
@@ -39,6 +44,7 @@ export function buildSystem(bodies: readonly BodyData[]): SolarSystemScene {
   const geometry = new SphereGeometry(1, SEGMENTS.width, SEGMENTS.height);
   const meshes = new Map<string, Mesh>();
   const orbits = new Map<string, Group>();
+  const parents = new Map(bodies.map((b) => [b.id, bodies.find((p) => p.id === b.parent)]));
 
   for (const body of bodies) {
     const material =
@@ -82,6 +88,18 @@ export function buildSystem(bodies: readonly BodyData[]): SolarSystemScene {
         orbits.get(body.id)?.position.set(...offsets.get(body.id)!);
       }
       root.updateMatrixWorld(true);
+    },
+    applyPositions(offsets) {
+      for (const body of bodies) {
+        const { x, y, z } = offsets.get(body.id)!;
+        orbits.get(body.id)?.position.set(x, y, z);
+      }
+      root.updateMatrixWorld(true);
+    },
+    applyOrientations(days, speedDaysPerSecond) {
+      for (const body of bodies) {
+        orientation(body, days, speedDaysPerSecond, meshes.get(body.id)!.quaternion, parents.get(body.id));
+      }
     },
     mesh(id) {
       const mesh = meshes.get(id);

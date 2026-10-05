@@ -372,6 +372,102 @@ describe('SpaceManager', () => {
     });
   });
 
+  describe('start time and saved state (spec 021, AC-8, AC-12)', () => {
+    /** Gives the mounted instance of `space` a `saveState()` returning `state`. */
+    const saving = (space: ReturnType<typeof createSpace>, state: unknown) => {
+      const instance = space.instances.at(-1)!;
+      instance.saveState = vi.fn(() => state);
+      return instance;
+    };
+
+    it('passes the wall clock as startTime, read again at each open (Q1)', async () => {
+      const wallClock = vi.fn().mockReturnValueOnce(1000).mockReturnValueOnce(2000);
+      const timed = new SpaceManager({
+        engine,
+        fader,
+        registry: [a.meta],
+        reducedMotion: () => false,
+        wallClock,
+      });
+      await timed.open('a');
+      await timed.open('a');
+      expect(a.instances.map((i) => i.ctx.startTime)).toEqual([1000, 2000]);
+    });
+
+    it('a normal open gets no saved state (Q8: a new visit starts fresh)', async () => {
+      await manager.open('a');
+      expect(a.instances[0]?.ctx.savedState).toBeUndefined();
+      expect('savedState' in a.instances[0]!.ctx).toBe(false);
+    });
+
+    it('suspend() keeps the Space’s saveState(); resume() hands it back as savedState', async () => {
+      await manager.open('a');
+      const first = saving(a, { days: 42 });
+      manager.suspend();
+      expect(first.saveState).toHaveBeenCalledOnce();
+      expect(log.indexOf('dispose(a)')).toBeGreaterThan(-1); // still disposed
+
+      await manager.resume();
+      expect(a.instances[1]?.ctx.savedState).toEqual({ days: 42 });
+    });
+
+    it('uses a saved state once: a later open of the same Space starts fresh', async () => {
+      await manager.open('a');
+      saving(a, { days: 42 });
+      manager.suspend();
+      await manager.resume();
+      await manager.open('a');
+      expect(a.instances[2]?.ctx.savedState).toBeUndefined();
+    });
+
+    it('a newer open() or close() after suspend drops the saved state', async () => {
+      await manager.open('a');
+      saving(a, { days: 1 });
+      manager.suspend();
+      await manager.open('a');
+      expect(a.instances[1]?.ctx.savedState).toBeUndefined();
+
+      saving(a, { days: 2 });
+      manager.suspend();
+      await manager.close();
+      await manager.open('a');
+      manager.suspend();
+      await manager.resume();
+      expect(a.instances.at(-1)?.ctx.savedState).toBeUndefined();
+    });
+
+    it('a second loss while the restored Space is still loading keeps its saved state', async () => {
+      await manager.open('a');
+      saving(a, { days: 7 });
+      manager.suspend();
+      const loadA = deferred<{ default: SpaceFactory }>();
+      const realA = await a.meta.load();
+      a.load.mockReturnValueOnce(loadA.promise);
+      const resumed = manager.resume();
+      await flush();
+      manager.suspend(); // nothing mounted yet
+      loadA.resolve(realA);
+      await expect(resumed).resolves.toBe('superseded');
+
+      await manager.resume();
+      expect(a.instances.at(-1)?.ctx.savedState).toEqual({ days: 7 });
+    });
+
+    it('a saveState() that throws is logged; the Space is still disposed and resumes fresh', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await manager.open('a');
+      a.instances[0]!.saveState = () => {
+        throw new Error('boom');
+      };
+      manager.suspend();
+      expect(a.instances[0]?.dispose).toHaveBeenCalled();
+      expect(error).toHaveBeenCalled();
+      await manager.resume();
+      expect(a.instances[1]?.ctx.savedState).toBeUndefined();
+      error.mockRestore();
+    });
+  });
+
   describe('loading indication (spec 010, AC-8)', () => {
     let loading: {
       show: ReturnType<typeof vi.fn<(label: string) => void>>;

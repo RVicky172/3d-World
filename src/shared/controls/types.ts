@@ -75,5 +75,11 @@ export interface CameraControls {
    * view's closest distance (e.g. just outside the body focused on) until `reset()`.
    */
   focusOn(point: Vec3, options?: { minDistance?: number }): void;
+  /**
+   * Moves the camera and the target together by `delta` (spec 021, AC-10: keeping a moving body centred). Not an
+   * interaction: `userMoved` and the turntable keep their state. Call before `update()`, which applies the limits.
+   * Takes any `{ x, y, z }` so a caller can reuse one vector per frame.
+   */
+  follow(delta: { readonly x: number; readonly y: number; readonly z: number }): void;
   dispose(): void;
 }

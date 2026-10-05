@@ -369,6 +369,38 @@ describe('createCameraControls', () => {
     });
   });
 
+  describe('follow() (spec 021, AC-10)', () => {
+    it('moves the camera and the target together by the delta: the view is unchanged', () => {
+      create(true);
+      controls.focusOn([0.5, 0, 0]);
+      const offset = camera.position.clone().sub(controls.target);
+      const quaternion = camera.quaternion.clone();
+      controls.follow(new Vector3(0.25, -0.1, 0.05));
+      expectAt(controls.target, [0.75, -0.1, 0.05]);
+      expectAt(camera.position.clone().sub(controls.target), offset.toArray());
+      controls.update(1 / 60);
+      expectAt(camera.position.clone().sub(controls.target), offset.toArray());
+      expect(camera.quaternion.angleTo(quaternion)).toBeLessThan(1e-6);
+    });
+
+    it('is not an interaction: userMoved and the turntable keep their state', () => {
+      create(false);
+      frames(10);
+      expect(controls.turntableActive).toBe(true);
+      controls.follow({ x: 0.1, y: 0, z: 0 });
+      frames(1);
+      expect(controls.userMoved).toBe(false);
+      expect(controls.turntableActive).toBe(true);
+    });
+
+    it('keeps the pan limit: the next update clamps a target followed out of range', () => {
+      create(true); // panLimit 1 around the focus
+      controls.follow({ x: 3, y: 0, z: 0 });
+      controls.update(1 / 60);
+      expect(controls.target.length()).toBeLessThanOrEqual(1 + 1e-9);
+    });
+  });
+
   describe('focusOn() and zoomSpeed (spec 020, D-023)', () => {
     it('focusOn() moves the orbit target to the point and keeps the camera where it is', () => {
       create(true);

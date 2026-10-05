@@ -7,12 +7,14 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   PointLight,
+  Quaternion,
   Vector3,
   type BufferGeometry,
   type Material,
 } from 'three';
 import { BODIES, SOLAR_SYSTEM } from '../../../../src/spaces/solar-system/data';
-import { layout, worldPositions } from '../../../../src/spaces/solar-system/scale';
+import { orientation } from '../../../../src/spaces/solar-system/orbit';
+import { createPlacement, layout, worldPositions } from '../../../../src/spaces/solar-system/scale';
 import { buildSystem } from '../../../../src/spaces/solar-system/scene';
 
 // Spec 020: the scene graph 021 will animate (plan: pivots), lit by the Sun (AC-10). A scale switch moves
@@ -112,6 +114,53 @@ describe('applyLayout (AC-8)', () => {
     expect(
       byName(system.root, 'earth').getWorldPosition(new Vector3()).distanceTo(earthBefore),
     ).toBeGreaterThan(1);
+  });
+});
+
+// Spec 021, AC-4/AC-5 (plan §4): per-date positions and orientations, set without allocating.
+describe('applyPositions / applyOrientations (021)', () => {
+  const byId = new Map(BODIES.map((b) => [b.id, b]));
+
+  it('moves each orbit group to its offset for the date; moons still ride their planet at their own size', () => {
+    const system = buildSystem(BODIES);
+    const styl = layout(BODIES, 'stylised');
+    system.applyLayout(styl);
+    const offsets = createPlacement(BODIES).at(styl, 'stylised', 9000);
+    system.applyPositions(offsets);
+    for (const body of BODIES.filter((b) => b.parent)) {
+      const { x, y, z } = offsets.get(body.id)!;
+      expect(byName(system.root, `${body.id}-orbit`).position.toArray(), body.id).toEqual([x, y, z]);
+    }
+    // World positions are current (markers project them in the same frame) and a moon isn't scaled by its planet.
+    const moonWorld = system.mesh('moon').getWorldPosition(new Vector3());
+    const earth = offsets.get('earth')!;
+    const moon = offsets.get('moon')!;
+    expect(moonWorld.toArray()).toEqual([earth.x + moon.x, earth.y + moon.y, earth.z + moon.z]);
+    expect(system.mesh('moon').getWorldScale(new Vector3()).x).toBeCloseTo(styl.get('moon')!.radius, 12);
+  });
+
+  it('turns each mesh to its orientation on the date, at the given speed', () => {
+    const system = buildSystem(BODIES);
+    system.applyOrientations(1234.5, 7);
+    for (const body of BODIES) {
+      const parent = body.kind === 'moon' ? byId.get(body.parent!) : undefined;
+      const expected = orientation(body, 1234.5, 7, new Quaternion(), parent) as Quaternion;
+      expect(system.mesh(body.id).quaternion.angleTo(expected), body.id).toBeLessThan(1e-6); // acos rounding
+    }
+  });
+
+  it('reuses the same objects every call (no allocation per frame)', () => {
+    const system = buildSystem(BODIES);
+    const placement = createPlacement(BODIES);
+    const styl = layout(BODIES, 'stylised');
+    const earthOrbit = byName(system.root, 'earth-orbit');
+    const [position, quaternion] = [earthOrbit.position, system.mesh('earth').quaternion];
+    for (const days of [0, 1, 2]) {
+      system.applyPositions(placement.at(styl, 'stylised', days));
+      system.applyOrientations(days, 7);
+    }
+    expect(earthOrbit.position).toBe(position);
+    expect(system.mesh('earth').quaternion).toBe(quaternion);
   });
 });
 

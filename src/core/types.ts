@@ -29,6 +29,16 @@ export interface SpaceContext {
    * Shown by the loading indicator; calls after the open has finished, failed or been superseded do nothing.
    */
   reportProgress?(fraction: number | null): void;
+  /**
+   * Wall-clock time of this open, ms since the Unix epoch (spec 021, Q1: the Solar System opens "today"). The
+   * core reads the clock so Space logic never does (Constitution VI).
+   */
+  startTime: number;
+  /**
+   * What the Space's `saveState()` returned before a WebGL context loss, on the rebuild that follows it
+   * (spec 021, AC-12). Absent on every other open (Q8: a new visit starts fresh).
+   */
+  savedState?: unknown;
 }
 
 /** A live, mounted Space. */
@@ -51,7 +61,19 @@ export interface SpaceInstance {
   /** World positions of the Space's hotspots, in data order (test seam, spec 012 AC-6). */
   hotspotPositions?(): Array<{ id: string; world: [number, number, number] }>;
   /** Bodies' world positions and drawn radii, in scene units (test seam, spec 020). */
-  bodies?(): Array<{ id: string; world: [number, number, number]; radius: number }>;
+  bodies?(): Array<{
+    id: string;
+    world: [number, number, number];
+    radius: number;
+    /** World orientation x, y, z, w (spec 021, AC-4). */
+    quaternion?: [number, number, number, number];
+  }>;
+  /** State to carry across a context loss (spec 021, AC-12); comes back as `SpaceContext.savedState`. */
+  saveState?(): unknown;
+  /** Simulated time, `days` since J2000 and `speed` in days per second (test seam, spec 021). */
+  simTime?(): { days: number; speed: number; playing: boolean };
+  /** Jumps to a simulated date (test seam, spec 021). */
+  setSimTime?(days: number): void;
   /** Free everything: geometries, materials, textures, listeners, DOM. */
   dispose(): void;
 }

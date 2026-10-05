@@ -127,12 +127,85 @@ describe('plausibility (AC-3)', () => {
 describe('sources (AC-4)', () => {
   it('names a source with URL, licence and date read for each kind of data', () => {
     const covered = new Set(SOURCES.flatMap((s) => s.covers));
-    expect([...covered].sort()).toEqual(['moon-orbits', 'physical', 'planet-orbits']);
+    expect([...covered].sort()).toEqual(['moon-orbits', 'physical', 'planet-orbits', 'rotation']);
     for (const source of SOURCES) {
       expect(source.name.trim()).not.toBe('');
       expect(source.url).toMatch(/^https:\/\//);
       expect(source.licence.trim()).not.toBe('');
       expect(source.read).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+  });
+});
+
+describe('motion data for 021 (D-025)', () => {
+  const finite = (...values: number[]) => values.every(Number.isFinite);
+
+  it('planets carry their JPL Table 1 element rates per century', () => {
+    for (const { id, orbit } of planets) {
+      const r = orbit!.ratesPerCentury;
+      expect(r, id).toBeDefined();
+      expect(
+        finite(
+          r!.semiMajorAxisKm,
+          r!.eccentricity,
+          r!.inclinationDeg,
+          r!.meanLongitudeDeg,
+          r!.perihelionLongitudeDeg,
+          r!.ascendingNodeDeg,
+        ),
+        id,
+      ).toBe(true);
+      // The mean longitude's rate is the planet's motion: 36 525 days of it is one century.
+      expect(r!.meanLongitudeDeg / 36_525, id).toBeCloseTo(360 / orbit!.periodDays, 4);
+    }
+  });
+
+  it('moons carry their apsis and node precession periods (0 = none given)', () => {
+    for (const moon of BODIES.filter((b) => b.kind === 'moon')) {
+      expect(moon.orbit!.apsisPeriodYears, moon.id).toBeGreaterThanOrEqual(0);
+      expect(moon.orbit!.nodePeriodYears, moon.id).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('every body has a pole (RA, Dec) and prime meridian from NAIF', () => {
+    for (const b of BODIES) {
+      const { poleRaDeg, poleDecDeg, primeMeridianDeg } = b.rotation;
+      expect(finite(...poleRaDeg, ...poleDecDeg, ...primeMeridianDeg), b.id).toBe(true);
+      expect(Math.abs(poleDecDeg[0]), b.id).toBeLessThanOrEqual(90);
+      expect(primeMeridianDeg[1], b.id).not.toBe(0);
+    }
+  });
+
+  /** A unit vector in the ecliptic J2000 frame from equatorial RA/Dec. */
+  const fromEquatorial = (raDeg: number, decDeg: number) => {
+    const ra = (raDeg * Math.PI) / 180;
+    const dec = (decDeg * Math.PI) / 180;
+    const e = (23.4392911 * Math.PI) / 180;
+    const [x, y, z] = [Math.cos(dec) * Math.cos(ra), Math.cos(dec) * Math.sin(ra), Math.sin(dec)];
+    return [x, y * Math.cos(e) + z * Math.sin(e), -y * Math.sin(e) + z * Math.cos(e)] as const;
+  };
+  const angle = (a: readonly number[], b: readonly number[]) =>
+    (Math.acos(
+      Math.min(
+        1,
+        Math.max(
+          -1,
+          a.reduce((sum, v, i) => sum + v * b[i]!, 0),
+        ),
+      ),
+    ) *
+      180) /
+    Math.PI;
+
+  it('cross-check: each spin axis (pole × sign of spin) is tilted to its orbit as 020 says, within 1°', () => {
+    for (const b of BODIES.filter((x) => x.kind !== 'moon')) {
+      const pole = fromEquatorial(b.rotation.poleRaDeg[0], b.rotation.poleDecDeg[0]);
+      const axis = pole.map((v) => v * Math.sign(b.rotation.primeMeridianDeg[1]));
+      // The Sun's tilt is to the ecliptic; a planet's to its orbit plane (normal from I and Ω).
+      const i = ((b.orbit?.inclinationDeg ?? 0) * Math.PI) / 180;
+      const node = ((b.orbit?.ascendingNodeDeg ?? 0) * Math.PI) / 180;
+      const normal = [Math.sin(i) * Math.sin(node), -Math.sin(i) * Math.cos(node), Math.cos(i)];
+      expect(Math.abs(angle(axis, normal) - b.axialTiltDeg), b.id).toBeLessThan(1);
     }
   });
 });

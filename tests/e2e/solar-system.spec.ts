@@ -345,8 +345,13 @@ test.describe('lighting, with reduced motion', () => {
   });
 });
 
-test('AC-11: the bodies hold still while the turntable turns the camera', async ({ page }) => {
+// 020 AC-11, kept under 021: with time paused, the turntable alone never moves a body.
+test('AC-11: with time paused, the bodies hold still while the turntable turns the camera', async ({
+  page,
+}) => {
   await gotoSpace(page, ID);
+  await page.getByRole('button', { name: 'Pause time' }).click();
+  await frames(page); // the pause takes effect on the next frame (paused bodies show their true spin)
   const first = await page.evaluate(() => window.__WORLD__!.bodies());
   const pose = await cameraPose(page);
   await page.waitForTimeout(1000);
@@ -384,8 +389,9 @@ test.describe('lifecycle, with reduced motion', () => {
       // One shared sphere, the same count as the gallery's starfield: the leak check is the final equality.
       expect(during.geometries).toBeGreaterThanOrEqual(1);
       await toggle(page).click(); // leave from either scale, markers included
+      await page.getByRole('button', { name: 'Play time' }).click(); // 021: leave with time running too
       await toGallery();
-      await expect(page.locator('.scale, .body-markers')).toHaveCount(0);
+      await expect(page.locator('.scale, .body-markers, .solar-bar, .time-controls')).toHaveCount(0);
     }
     expect(await snapshot()).toEqual(baseline);
   });

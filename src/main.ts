@@ -48,7 +48,7 @@ function startApp(app: HTMLElement, renderer: WebGLRenderer): void {
       open: readPreference(PANEL_OPEN, true),
       onToggle: (open) => writePreference(PANEL_OPEN, open),
     });
-  const manager = new SpaceManager({ engine, fader, reducedMotion, loading, infoPanel });
+  const manager = new SpaceManager({ engine, fader, reducedMotion, loading, infoPanel, wallClock: Date.now });
   // Home page (spec 003): a view built from registry metadata only, so no Space code loads here.
   const gallery = createGalleryView({ spaces, baseUrl: import.meta.env.BASE_URL });
   createBackLink(app);

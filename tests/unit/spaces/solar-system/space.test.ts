@@ -1,19 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Mesh, PerspectiveCamera, Vector3, type BufferGeometry } from 'three';
+import { LineLoop, Mesh, PerspectiveCamera, Quaternion, Vector3, type BufferGeometry } from 'three';
 import type { SpaceContext, SpaceInstance } from '../../../../src/core/types';
 import { BODIES, SOLAR_SYSTEM } from '../../../../src/spaces/solar-system/data';
 import { createSolarSystem, SCALE_PREFERENCE } from '../../../../src/spaces/solar-system';
-import { layout, systemExtent, worldPositions } from '../../../../src/spaces/solar-system/scale';
+import { createPlacement, layout, systemExtent } from '../../../../src/spaces/solar-system/scale';
+import { daysFromEpochMs, RANGE } from '../../../../src/spaces/solar-system/time';
 import { frameDistance } from '../../../../src/shared/model-viewer/framing';
 import { toScreen } from '../../../../src/shared/hotspots/projection';
 import { createFakeContext, memoryStorage } from '../../../helpers/fakes';
 
 // Spec 020: the Space ties data, scale, toggle, markers and controls together (AC-7, AC-8, AC-8a, AC-11,
-// AC-12), with the D-023 re-centring zoom at real scale.
+// AC-12), with the D-023 re-centring zoom at real scale. Spec 021: time moves the bodies (AC-4–AC-12).
 
 const W = 800;
 const H = 600;
 const FOV_Y = (SOLAR_SYSTEM.camera.fov * Math.PI) / 180;
+
+/** World positions on a date, from the per-date placement (021): each offset plus its parent's. */
+const worldAt = (mode: 'stylised' | 'real', days: number) => {
+  const offsets = createPlacement(BODIES).at(layout(BODIES, mode), mode, days);
+  const world = new Map<string, Vector3>();
+  for (const b of BODIES) {
+    const { x, y, z } = offsets.get(b.id)!;
+    world.set(b.id, new Vector3(x, y, z).add(b.parent ? world.get(b.parent)! : new Vector3()));
+  }
+  return world;
+};
 
 describe('createSolarSystem', () => {
   let ctx: SpaceContext;
@@ -96,10 +108,8 @@ describe('createSolarSystem', () => {
       await open();
       toggle().click();
       expect(body('earth').radius).toBeCloseTo(radiusIn('real', 'earth'), 12);
-      expect(body('neptune').world[0]).toBeCloseTo(
-        worldPositions(BODIES, layout(BODIES, 'real')).get('neptune')![0],
-        6,
-      );
+      const days = space.simTime!().days;
+      expect(body('neptune').world[0]).toBeCloseTo(worldAt('real', days).get('neptune')!.x, 6);
       expect(JSON.parse(storage.getItem(SCALE_PREFERENCE)!)).toBe('real');
       expect(camera().position.length()).toBeCloseTo(homeDistance('real'), 1);
       expect(markersLayer().hidden).toBe(false);
@@ -217,24 +227,242 @@ describe('createSolarSystem', () => {
       expect(Number(m[2])).toBeCloseTo(expected.y, 0);
     });
 
-    it('holds every body still while time passes (AC-11)', async () => {
+    it('holds every body still while time is paused (reduced motion: 021 AC-9)', async () => {
       await open();
+      expect(space.simTime!().playing).toBe(false);
       const before = space.bodies!();
       for (let i = 1; i <= 60; i++) space.update(1 / 60, i / 60);
       expect(space.bodies!()).toEqual(before);
     });
   });
 
-  it('bodies() reports every body’s world position and radius (seam)', async () => {
+  describe('time (spec 021)', () => {
+    const today = daysFromEpochMs(Date.UTC(2026, 9, 5)); // the fake context's startTime
+    const playing = () => {
+      ctx = createFakeContext({ reducedMotion: false });
+      document.body.replaceChildren(ctx.canvas, ctx.overlay);
+      ctx.canvas.setPointerCapture = vi.fn();
+      ctx.canvas.releasePointerCapture = vi.fn();
+    };
+    const timeGroup = () => ctx.overlay.querySelector<HTMLElement>('.time-controls')!;
+    const playButton = () => timeGroup().querySelector<HTMLButtonElement>('button.time-play')!;
+    const speedSelect = () => timeGroup().querySelector<HTMLSelectElement>('select')!;
+    const chooseSpeed = (value: string) => {
+      speedSelect().value = value;
+      speedSelect().dispatchEvent(new Event('change'));
+    };
+    const announcer = () => timeGroup().querySelector<HTMLElement>('[aria-live="polite"]')!;
+    const run = (seconds: number, step = 1 / 60) => {
+      for (let t = 0; t < seconds - 1e-9; t += step) space.update(step, t);
+    };
+    const gap = (a: number[], b: number[]) => Math.hypot(a[0]! - b[0]!, a[1]! - b[1]!, a[2]! - b[2]!);
+
+    it('opens at the start time, playing at 1 week per second (Q1, Q2)', async () => {
+      playing();
+      await open();
+      expect(space.simTime!()).toEqual({ days: today, speed: 7, playing: true });
+      expect(timeGroup().querySelector('time')!.getAttribute('datetime')).toBe('2026-10-05');
+    });
+
+    it('opens paused with reduced motion (AC-9); Play starts it', async () => {
+      await open();
+      expect(space.simTime!().playing).toBe(false);
+      playButton().click();
+      space.update(1, 1);
+      expect(space.simTime!().days).toBeCloseTo(today + 7, 9);
+    });
+
+    it('update(delta) advances the date and moves the bodies along their orbits (AC-5)', async () => {
+      playing();
+      await open();
+      const before = body('earth').world;
+      run(1);
+      expect(space.simTime!().days).toBeCloseTo(today + 7, 6);
+      expect(gap(body('earth').world, before)).toBeGreaterThan(0.1);
+      const expected = worldAt('stylised', space.simTime!().days);
+      for (const b of space.bodies!()) {
+        expect(gap(b.world, expected.get(b.id)!.toArray()), b.id).toBeLessThan(1e-9);
+      }
+    });
+
+    it('the same date by different paths gives the same scene (AC-5)', async () => {
+      playing();
+      await open();
+      run(2, 1 / 30); // 14 days in 60 frames
+      const reached = space.simTime!().days;
+      const viaFrames = space.bodies!();
+      space.dispose();
+
+      await open();
+      playButton().click(); // pause
+      space.setSimTime!(reached);
+      space.update(1 / 60, 0);
+      space.bodies!().forEach((b, i) => expect(gap(b.world, viaFrames[i]!.world), b.id).toBeLessThan(1e-9));
+    });
+
+    it('turns each body on its axis as time runs (AC-4)', async () => {
+      playing();
+      await open();
+      chooseSpeed('day'); // slow enough that Mercury isn't held by the fast-spin rule
+      const mercury = space.scene.getObjectByName('mercury')!;
+      const before = mercury.quaternion.clone();
+      run(1);
+      expect(mercury.quaternion.angleTo(before)).toBeGreaterThan(0.05); // ~6° a day
+    });
+
+    it('the speed select and the Backwards toggle change how the date moves (AC-6)', async () => {
+      playing();
+      await open();
+      chooseSpeed('year');
+      space.update(1, 1);
+      expect(space.simTime!().days).toBeCloseTo(today + 365.25, 6);
+      expect(space.simTime!().speed).toBe(365.25);
+      timeGroup().querySelector<HTMLButtonElement>('button.time-direction')!.click();
+      space.update(1, 2);
+      expect(space.simTime!().days).toBeCloseTo(today, 6);
+      expect(space.simTime!().speed).toBe(-365.25);
+    });
+
+    it('a range limit pauses time there and says so (AC-8)', async () => {
+      playing();
+      await open();
+      space.setSimTime!(RANGE.end - 2);
+      space.update(1, 1);
+      expect(space.simTime!()).toMatchObject({ days: RANGE.end, playing: false });
+      expect(announcer().textContent).toMatch(/^Reached 2050/);
+      expect(playButton().textContent).toBe('Play time');
+    });
+
+    it('setSimTime() clamps to the supported range', async () => {
+      await open();
+      space.setSimTime!(RANGE.start - 1000);
+      expect(space.simTime!().days).toBe(RANGE.start);
+    });
+
+    describe('following a re-centred body at real scale (AC-10, Q4)', () => {
+      const recentreOn = (id: string) => {
+        const at = screenOf(id);
+        wheelAt(at.x, at.y);
+        space.update(0, 0);
+      };
+
+      it('keeps the body centred while time runs', async () => {
+        playing();
+        await open('real');
+        recentreOn('earth');
+        const start = body('earth').world;
+        run(2); // two weeks: Earth moves ~36 units
+        expect(gap(body('earth').world, start)).toBeGreaterThan(10);
+        expect(looksAt('earth')).toBeLessThan(1e-6);
+      });
+
+      it('a reset stops following: the view goes home and stays on the Sun', async () => {
+        playing();
+        await open('real');
+        recentreOn('earth');
+        run(0.5);
+        ctx.overlay.querySelector<HTMLButtonElement>('button.controls-reset')!.click();
+        run(1);
+        expect(looksAt('sun')).toBeLessThan(1e-6);
+      });
+
+      it('a pan stops following: the camera stays where the visitor left it', async () => {
+        playing();
+        await open('real');
+        recentreOn('earth');
+        run(0.5);
+        ctx.canvas.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'ArrowLeft', shiftKey: true, bubbles: true }),
+        );
+        space.update(1 / 60, 1);
+        const where = camera().position.clone();
+        run(1);
+        expect(camera().position.distanceTo(where)).toBeLessThan(1e-6);
+      });
+
+      it('never follows at stylised scale', async () => {
+        playing();
+        await open();
+        const earth = screenOf('earth');
+        wheelAt(earth.x, earth.y);
+        run(1);
+        expect(looksAt('sun')).toBeLessThan(1e-6);
+      });
+    });
+
+    it('saveState() → savedState restores the date, speed, direction and play state (AC-12)', async () => {
+      playing();
+      await open();
+      chooseSpeed('month');
+      timeGroup().querySelector<HTMLButtonElement>('button.time-direction')!.click();
+      space.setSimTime!(today - 400);
+      playButton().click(); // pause
+      const saved = space.saveState!();
+      space.dispose();
+
+      ctx = { ...createFakeContext({ reducedMotion: false }), savedState: saved };
+      document.body.replaceChildren(ctx.canvas, ctx.overlay);
+      await open();
+      expect(space.simTime!()).toEqual({ days: today - 400, speed: -30.436875, playing: false });
+      expect(speedSelect().value).toBe('month');
+      expect(playButton().textContent).toBe('Play time');
+    });
+
+    it('ignores a saved state it doesn’t recognise and starts fresh', async () => {
+      ctx = { ...createFakeContext({ reducedMotion: true }), savedState: { days: 'soon' } };
+      document.body.replaceChildren(ctx.canvas, ctx.overlay);
+      await open();
+      expect(space.simTime!()).toEqual({ days: today, speed: 7, playing: false });
+    });
+
+    it('draws faint orbit lines for the current scale only (AC-11)', async () => {
+      await open();
+      const visibleLines = () => {
+        const names: string[] = [];
+        space.scene.traverse((o) => {
+          if (o instanceof LineLoop && o.visible) names.push(o.name);
+        });
+        return names;
+      };
+      expect(visibleLines()).toHaveLength(15);
+      expect(visibleLines().every((n) => n.endsWith('-path-stylised'))).toBe(true);
+      toggle().click();
+      expect(visibleLines()).toHaveLength(15);
+      expect(visibleLines().every((n) => n.endsWith('-path-real'))).toBe(true);
+    });
+
+    it('markers follow the moving bodies in the same frame, even with the camera still (AC-10)', async () => {
+      await open('real'); // reduced motion: no turntable, so only time moves anything
+      playButton().click();
+      chooseSpeed('year');
+      space.update(0.1, 0.1); // Mercury moves ~150°
+      const marker = ctx.overlay.querySelector<HTMLElement>('.body-marker[data-body="mercury"]')!;
+      const m = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(marker.style.transform)!;
+      const expected = screenOf('mercury');
+      expect(Number(m[1])).toBeCloseTo(expected.x, 0);
+      expect(Number(m[2])).toBeCloseTo(expected.y, 0);
+    });
+
+    it('puts the time controls between "True scale" and the camera controls in Tab order', async () => {
+      await open();
+      const order = [...ctx.overlay.querySelectorAll('button, select')].map((e) => e.className.split(' ')[0]);
+      expect(order.indexOf('scale-toggle')).toBeLessThan(order.indexOf('time-play'));
+      expect(order.indexOf('time-direction')).toBeLessThan(order.indexOf('controls-reset'));
+    });
+  });
+
+  it('bodies() reports every body’s world position, radius and orientation (seam)', async () => {
     await open();
-    const expected = worldPositions(BODIES, layout(BODIES, 'stylised'));
+    const expected = worldAt('stylised', space.simTime!().days);
     expect(
       space.bodies!()
         .map((b) => b.id)
         .sort(),
     ).toEqual(BODIES.map((b) => b.id).sort());
     for (const b of space.bodies!()) {
-      b.world.forEach((c, i) => expect(c, b.id).toBeCloseTo(expected.get(b.id)![i]!, 6));
+      b.world.forEach((c, i) => expect(c, b.id).toBeCloseTo(expected.get(b.id)!.getComponent(i), 6));
+      const reported = new Quaternion().fromArray(b.quaternion!);
+      expect(reported.angleTo(space.scene.getObjectByName(b.id)!.quaternion), b.id).toBeLessThan(1e-6);
     }
   });
 
@@ -247,7 +475,12 @@ describe('createSolarSystem', () => {
     const spy = vi.spyOn(geometry!, 'dispose');
     space.dispose();
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(ctx.overlay.querySelector('.scale-toggle, .body-markers')).toBeNull();
+    expect(ctx.overlay.querySelector('.scale-toggle, .body-markers, .time-controls, .solar-bar')).toBeNull();
+    let lines = 0;
+    space.scene.traverse((o) => {
+      if (o instanceof LineLoop) lines++;
+    });
+    expect(lines).toBe(0); // the orbit lines are gone
     expect(ctx.canvas.hasAttribute('aria-describedby')).toBe(false);
     expect(ctx.canvas.hasAttribute('tabindex')).toBe(false); // the controls are gone too
   });

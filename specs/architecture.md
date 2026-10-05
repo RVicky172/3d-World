@@ -121,6 +121,9 @@ export interface SpaceContext {
   overlay: HTMLElement; // DOM layer above the canvas for the Space's own UI
   reducedMotion: boolean;
   signal: AbortSignal; // aborted right before dispose(): use for listeners/fetches
+  reportProgress?(fraction: number | null): void; // download progress (011)
+  startTime: number; // wall-clock ms at this open, read by the core (021, Q1)
+  savedState?: unknown; // the Space's saveState() from before a context loss; only on that rebuild (021, AC-12)
 }
 
 export interface SpaceInstance {
@@ -131,7 +134,10 @@ export interface SpaceInstance {
   render?(): void; // opt-in custom rendering (e.g. EffectComposer)
   focusTarget?(context: { previousSpaceId: string | null }): HTMLElement | null; // where focus lands on a switch (004 AC-13)
   hotspotPositions?(): Array<{ id: string; world: [number, number, number] }>; // test seam (012 AC-6)
-  bodies?(): Array<{ id: string; world: [number, number, number]; radius: number }>; // test seam (020)
+  bodies?(): Array<{ id; world; radius; quaternion? }>; // test seam (020; orientation 021)
+  saveState?(): unknown; // carried across a context loss (021)
+  simTime?(): { days: number; speed: number; playing: boolean }; // test seam (021)
+  setSimTime?(days: number): void; // test seam (021)
   dispose(): void; // free GPU + DOM + listeners
 }
 
@@ -152,6 +158,8 @@ export type OpenResult = 'opened' | 'not-found' | 'load-error' | 'superseded';
   `clock.reset()`, so the next frame gets `delta = 0` instead of the time spent hidden.
 - Spaces must derive motion from `update(delta, elapsed)` only, never from `Date.now()` or `performance.now()`.
   `FakeClock.step(seconds)` drives them deterministically in tests.
+- **A Space that needs "today" (021)** gets `SpaceContext.startTime`: the core's `wallClock()` read once per open
+  (`Date.now` in `main.ts`, a constant in tests). The Space's own simulated clock then moves only by `delta`.
 
 ## Rendering & Resizing (Engine)
 
@@ -219,6 +227,10 @@ open(B) / openView('gallery', f)
   itself to the overlay, so its toggle follows the 3D view in Tab order. `release()` disposes it with the view: on
   unmount, failure, supersession, `suspend()` and `close()`. The gallery gets none. See Info Panel below.
 - **`close()`:** disposes the active Space, clears any message, and cancels any `open()` that is still running.
+- **Start time and saved state (021, AC-8, AC-12):** each factory call gets `startTime: wallClock()`. `suspend()`
+  asks a mounted view for `saveState?.()` (a throw is logged and treated as none); `resume()` passes it as
+  `savedState`. One state per target: kept while the rebuild is still loading (a second loss doesn't lose it),
+  dropped by any other `open()`, `openView()` or `close()`. A normal open never gets one (Q8).
 - **Loading indicator (010, AC-8):** optional `loading` (from `createLoadingIndicator()`) and `loadingDelayMs`
   (default 250 ms). The timer starts **after** the fade-out, so ordinary fades never show it, and a view that is
   ready sooner never shows it. It reads "Loading <registry title>…" (the view's label for the gallery), is a
@@ -356,6 +368,9 @@ label, config })` in its factory. It calls `controls.update(delta)` from `update
   where it is, so the view turns to it. Instant; counts as an interaction. `minDistance` replaces the home view's
   closest distance until `reset()`, which restores it; a resize while focused keeps the focus limit.
 - **`zoomSpeed` config (020):** OrbitControls' wheel/pinch zoom speed (default 1).
+- **`follow(delta)` (021, AC-10):** moves camera and target together by any `{ x, y, z }` (a reused vector, no
+  per-frame allocation). Not an interaction: `userMoved` and the turntable are untouched. It doesn't call
+  `update()` itself (that would flush the visitor's damping every frame); the frame's `update()` applies the limits.
 - **Reset:** flush in-flight damping (one `update()` with damping off), then `OrbitControls.reset()` to the saved
   initial state. Without the flush, the reset drifts.
 - **UI (`ctx.overlay`):**
@@ -463,7 +478,8 @@ position, view }` in the Space's `data.ts`; `position` is in the model's own (gl
 ## Tab Order inside a Space (004, 012)
 
 Back link → 3D view (canvas) → info panel toggle → hotspot markers that aren't dimmed, in data order → the open
-annotation's Close → "?" → "Reset view" → the model credit's link. The core prepends the panel; the viewer adds
+annotation's Close → "?" → "Reset view" → the model credit's link. The Solar System puts "True scale" and its
+time controls between the info toggle and "?" (020–021). The core prepends the panel; the viewer adds
 the hotspot layer before the controls; the credit is appended last.
 
 ## Asset Pipeline (`npm run assets`, 011)
@@ -559,37 +575,72 @@ composers.
 | Scale preference (unit)       | `window.localStorage`                                      | `memoryStorage()` (`tests/helpers/fakes.ts`) via `SolarSystemDeps.storage`                   |
 | Pointer events (unit)         | `PointerEvent`, pointer capture                            | `MouseEvent` with `pointerId`/`pointerType` defined; stubbed `setPointerCapture` (jsdom)     |
 | Touch re-centring (E2E)       | fingers landing on a marker                                | `touchGesture(page, fingers, 0)`: touch start and end, no moves                              |
+| Wall clock (core, 021)        | `Date.now` passed to `SpaceManager({ wallClock })`         | a constant; `createFakeContext()` has `startTime` 2026-10-05                                 |
+| Simulated time (E2E, 021)     | the time controls and `update(delta)`                      | `__WORLD__.simTime()` / `setSimTime(days)`; speeds measured against `performance.now()`      |
+| Orbit accuracy (unit, 021)    | JPL ephemerides                                            | `tests/fixtures/horizons-positions.json` (dev-only `scripts/fetch-reference-positions.mjs`)  |
+| Moving markers (E2E, 021)     | markers and bodies in the same frame                       | camera, `bodies()` and marker dots read in one `page.evaluate`, projected in Node            |
 
-`window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory`, `cameraAspect`, `cameraPose`, and
-`loseContext` / `restoreContext` (three's `forceContextLoss/Restore`; restore only after `data-webgl="lost"`). It is installed behind a
+`window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory`, `cameraAspect`, `cameraPose`,
+`cameraProjection`, `hotspots`, `bodies`, `simTime` / `setSimTime` (021), and `loseContext` / `restoreContext` (three's `forceContextLoss/Restore`; restore only after `data-webgl="lost"`). It is installed behind a
 literal `import.meta.env.MODE !== 'production'` check, so production bundles drop it. `npm run build` verifies this.
 
-## Solar System (`src/spaces/solar-system/`, 020)
+## Solar System (`src/spaces/solar-system/`, 020–021)
 
 The first multi-object Space: the Sun, eight planets and the seven moons ≥ 1 000 km (D-022), stylised or true to
-scale. 021 adds motion, 022 surfaces, 023 selection and facts.
+scale, moving on their orbits as a simulated clock runs (021). 022 adds surfaces, 023 selection and facts.
 
 - **Data (`data.ts`):** 16 `BodyData` records copied from JPL (Horizons physical data, planetary physical
   parameters, J2000 approximate elements, satellite mean elements; NSSDC was unreachable), each with its source
   listed in `SOURCES` and `CREDITS.md`. Planets carry full J2000 elements and moons their mean elements, so 021
   only adds maths. Rotation periods are positive; a tilt over 90° means a backwards spin (IAU). A unit test checks
-  every orbit against Kepler's third law (all within 0.75 %). Each body has a fixed `displayAngleDeg` until 021.
+  every orbit against Kepler's third law (all within 0.75 %). 021 adds JPL Table 1 rates per century, NAIF
+  `pck00011` poles and prime meridians (Mars's 71 000-year term folded in at J2000), and moons' apsis/node periods;
+  Titan's epoch mean anomaly is fitted to Horizons (D-026). `displayAngleDeg` is no longer used for placement.
 - **Scales (`scale.ts`, pure):**
   - **Real:** 1 unit = 10⁶ km for every radius and distance.
   - **Stylised:** radius `(r / R⊕)^0.25` (Sun capped at 3). Moons on their own rings by true order. Planets on
     packed rings, each clear of its neighbours at any angle, plus `1.5 · ln(aᵢ / aᵢ₋₁)` so wider true gaps stay
     wider. The system extent is ≈ 57 units; at the home view every body is ≥ 3.3 px at 1280 × 720 and ≥ 1.6 px at
     320 × 640 (unit-tested with a real perspective camera).
-- **Scene graph (`scene.ts`), ready for 021's motion:** `system` → Sun mesh + decay-0 `PointLight` + faint
+- **Simulated time (`time.ts`, 021):** `days` since J2000 (UTC), four speeds (1 day/week/month/year per second),
+  forwards or backwards, clamped to 1800-01-01 … 2050-12-31 (pauses at a limit and reports it once). A new visit
+  starts at `startTime`, 1 week/s, paused under reduced motion. `formatDate` ("12 Mar 2031") and `isoDate` in UTC.
+- **Orbit maths (`orbit.ts`, 021, pure, output parameters):**
+  - **Planets:** Table 1 elements + rates, Kepler by Newton, rotated into heliocentric ecliptic J2000 km. Within
+    0.17° and 0.13 % of Horizons at 7 dates (1800–2050).
+  - **Moons (D-026):** mean longitude at the NAIF synchronous spin rate `|Ẇ|`, apsis and node precession (the
+    node advancing on a retrograde orbit), angles on the planet's equator from its ascending node on the J2000
+    equator. Worst: Moon 1.4°, Galileans 2.1°, Titan 5.2°, Triton 25.1° (AC-3 allows Triton 30°).
+  - **Spin:** local +Y on the NAIF pole, +X at the prime meridian `W0 + Ẇ·d`; a body spinning faster than one turn
+    per real second holds `W0` (Q6), and a paused one shows its true `W`. Moons face their planet (+X towards it,
+    +Y along the orbit normal) at any speed.
+  - **Frames:** scene x = ecliptic X, y = ecliptic Z (north), z = −ecliptic Y (`toScene`).
+- **Per-date placement (`scale.ts` `createPlacement`, 021):** real = orbit maths ÷ 10⁶ km; stylised = the 020 ring
+  at the true angle projected on the XZ plane, so rings stay disjoint at any date. Writes into the same map and
+  vectors each call.
+- **Scene graph (`scene.ts`):** `system` → Sun mesh + decay-0 `PointLight` + faint
   ambient. For each planet an orbit group holds the planet mesh and one orbit group per moon, so moons never
   inherit the planet's scale.
   - **Precision:** every body is its own `Mesh` sharing one `SphereGeometry(1, 48, 24)`, so three builds each
     model-view matrix in float64. Instancing would put real-scale positions into float32 and jitter.
   - **Switching scale:** `applyLayout()` only moves groups and rescales meshes.
+  - **Per date (021):** `applyPositions(offsets)` (then world matrices) and `applyOrientations(days, speed)`.
+  - **Light:** ambient 0.1 (D-028), so a planet seen on its night side against black still shows.
+- **Orbit lines (`orbit-lines.ts`, 021, AC-11):** 15 `LineLoop`s per scale (256 points, one shared faint material,
+  no depth write, `raycast` a no-op), prebuilt and toggled by visibility. Planet lines hang off `system`, moon lines
+  off their planet's orbit group. Real ellipses are rewritten in place after 10 years (planets) or 1 % of the moon's
+  fastest precession (D-027: the Moon every ~22 days).
 - **The Space (`index.ts`):**
   - **Scale choice:** remembered in `localStorage` (`world.solarSystem.scale`, stylised by default).
-  - **Switching:** re-layout, markers on or off, then `setHome()` + `reset()`, which re-frames the whole system
-    instantly, even a moved camera.
+  - **Switching:** re-layout, orbit lines swapped, bodies re-placed, markers on or off, then `setHome()` +
+    `reset()`, which re-frames the whole system instantly, even a moved camera; any follow stops.
+  - **Per frame (021, plan §8):** advance time → if the time state changed: re-place bodies, orientations and
+    orbit lines, move the camera with a followed body, invalidate markers → `controls.update()` → follow check →
+    depth → `camera.updateMatrixWorld()` → markers → the date text (written only on a new day).
+  - **Following (Q4):** a re-centre (D-023) follows that body; it stops when the orbit target is no longer where
+    following put it (pan, reset, scale switch, re-centre elsewhere), checked before each follow step.
+  - **Saved state:** `{ time }` (date, speed, direction, play state) across a context loss; follow is not
+    restored (D-028).
   - **Home view:** from 35° off vertical at `frameDistance(extent, fov 40°, aspect, 0.85)`. The closest distance
     is 1.2 × the radius of the body orbited.
   - **Depth, every frame after the controls:**
@@ -601,7 +652,8 @@ scale. 021 adds motion, 022 surfaces, 023 selection and facts.
   pinch also pans by its midpoint, as two-finger gestures do.
 - **Real-scale markers (`markers.ts`, AC-8a):** an `aria-hidden` layer of labels (dot + name) that lets
   pointer events through.
-  - **Placement:** projected with `toScreen()`; written only when something changed.
+  - **Placement:** projected with `toScreen()`; written only when something changed. Re-projection is skipped
+    while the camera is unchanged, so the Space calls `invalidate()` whenever bodies move (021).
   - **Moons:** hidden within 24 px of their planet's marker.
   - **Declutter (D-024):** by body size, a name shows only if its box clears every name already shown (others
     keep their dot), and a name near the right edge sits left of its dot. Name sizes are measured once per show
@@ -609,12 +661,16 @@ scale. 021 adds motion, 022 surfaces, 023 selection and facts.
   - **`nearest(x, y, r)`** finds the body for re-centring.
 - **Scale toggle (`scale-toggle.ts`, AC-7):** a "True scale" button with `aria-pressed`, plus a visually hidden
   polite description that the canvas's `aria-describedby` points at, so the 3D view always states its scale.
-- **Tab order:** back link → 3D view → info toggle → "True scale" → "?" → "Reset view".
-- **Budget:** 12.3 KB gzipped, no assets; entry +0.5 KB.
+- **Time controls (`time-controls.ts`, 021, AC-6–AC-8):** a `role="group"` "Time": the date as `<time datetime>`
+  (not live), "Play time"/"Pause time", a native Speed `<select>`, a "Backwards" toggle (`aria-pressed`), and a
+  visually hidden polite region for play/pause, direction and range limits. `set()` shows state silently.
+  "True scale" and the time controls share a `.solar-bar` row (bottom-left; at ≤ 640 px it wraps above the
+  controls bar and the info sheet is lifted to 180 px).
+- **Tab order:** back link → 3D view → info toggle → "True scale" → Play/Pause → Speed → Backwards → "?" →
+  "Reset view".
+- **Budget:** 17.3 KB gzipped (020: 12.3), no assets; entry 146.6 KB (020 +0.5, 021 +0.1).
 
-## Multi-Object Pattern (planned, 021–023)
+## Multi-Object Pattern (planned, 022–023)
 
-- 021 moves the orbit groups with pure functions in `orbit.ts`, e.g. `positionAt(orbitalElements, t)`, unit-tested
-  without WebGL. It replaces `displayAngleDeg` with computed positions.
 - 022 adds textures, Saturn's rings, the starfield background and the Sun's glow; 023 adds selection and flying
   to a body (it may reuse `focusOn`).
