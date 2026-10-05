@@ -21,6 +21,8 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - `update(deltaTime)` makes `autoRotate` time-based, so the turntable is deterministic. Without the argument it assumes 60 fps.
 - Poses round-trip through `Spherical`, so expect `2e-16`-style noise. Compare with `toBeCloseTo`, not `toEqual`.
 - It sets `touch-action: none` on its element and restores `''` in `dispose()`.
+- **three's `Raycaster` is slow for visibility checks:** ~2 ms per ray on the 40k-triangle chair (r186, Chromium), because `Mesh.raycast` tests every triangle in any box the ray crosses and builds a full intersection (uv, normal, sort) for each hit. An any-hit Möller–Trumbore loop over a flat world-space `Float32Array` with early exit did 4 rays in 0.7 ms with identical answers (012 T040).
+- `controls.update()` moves the camera's position/quaternion but **not `matrixWorld`** (the renderer updates that later). Anything that projects or raycasts from the camera inside `SpaceInstance.update()` (012 hotspots) must call `camera.updateMatrixWorld()` first, or it lags a frame behind the pixels.
 
 ## WebGL context loss
 
@@ -51,6 +53,9 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 ## Testing
 
 - **Multi-touch in E2E:** `touchGesture()` in `tests/e2e/fixtures.ts` sends CDP `Input.dispatchTouchEvent`. Chromium turns it into pointer events, which OrbitControls handles (one-finger orbit, pinch, two-finger pan). It needs a context with `hasTouch: true` (and `isMobile` for coarse-pointer wording).
+- **Playwright `click()` on an element the turntable is moving stalls for seconds:** its actionability check waits for the box to stay put across two animation frames. A hotspot click took 9.3 s. Use `click({ force: true })` (still a real mouse click at the current centre) for moving targets, with reduced motion wherever the test allows it (012).
+- **DOM-count leak checks must skip the lazy `.loading-announcer`** (011, D-019). It's created on the first load slow enough to show the indicator and kept for the app's lifetime, so under 4-worker load a round-trip count went 31 → 32 once. Count `#app *:not(.loading-announcer)` (012 AC-15).
+- **A "paused" test must outlast the idle delay.** `turnTo` counts as interaction and restarts the turntable's 4 s idle delay, so checking stillness for 600 ms after opening an annotation passed even with `holdTurntable` removed. Check beyond the idle delay (012 AC-12).
 - `page.mouse.wheel()` scrolls wherever the mouse **currently** is. After a drag that ended over the canvas, a wheel meant for a button zooms the camera. Hover the target first.
 - **Camera assertions:** compare poses with `rotationBetween()` (degrees) and `distanceBetween()` plus tolerances, never exact equality. Motion tests: the turntable turns ~2° per 300 ms, and "stopped" is < 0.5°. Stable over 5 repeats in SwiftShader.
 - "Non-blank canvas" = `canvasCoverage(page)` (fraction of pixels differing from the corner/background pixel), not a distinct-colour count — colour counts depend on the model's rotation at capture time and flaked (9 vs >10). Its blank-canvas guard lives in the 001 not-found E2E test.
@@ -62,10 +67,12 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - Use Playwright's `test.use({ reducedMotion: "reduce" })` to make Space switches instant (fast loops) or to test the reduced-motion path.
 - To check a test can fail, sabotage the code temporarily — but keep it compiling: `noUnusedLocals` makes the test build (and the Playwright web server) fail if you just comment out the only use of an import. `void importedThing;` keeps it used. Verified AC-4 this way: skipping dispose gives 11 geometries vs baseline 1.
 - Scripts in `scripts/*.mjs` are type-checked (`allowJs` + `checkJs` + `// @ts-check`, JSDoc types) and unit-tested from `tests/unit/scripts/`.
+- **jsdom cascades real stylesheets** in `getComputedStyle` (selectors, specificity, later-wins). A unit test can load `src/styles/main.css` into a `<style>` and check rules such as `pointer-events` (012 hotspots test); `:has()`/`color-mix()` in the file don't break the parse.
 - jsdom has no 2D canvas: `canvas.getContext("2d")` returns null and logs "Not implemented". For generated textures use `DataTexture` (bytes in a `Uint8Array`) — works in Node and on the GPU. `createFakeContext()` in `tests/helpers/fakes.ts` builds a `SpaceContext` for factory tests.
 - Shared fakes (`FakeScheduler`, `FakeVisibility`, `createFakeRenderer`) live in `tests/helpers/fakes.ts`.
 - A test factory that spreads `Partial<SpaceInstance>` overrides loses the `Mock` type on its methods; use `vi.mocked(instance.resize)` to get it back.
 - **E2E parallelism can take down the machine.** Playwright defaults to half the cores (12 here); 12 SwiftShader Chromiums, each multi-threaded, loading the 010 chair crashed Windows. `playwright.config.ts` caps workers (D-015); use `E2E_WORKERS=2` for a gentler run. Don't raise the cap or pass `--workers` > 4 locally.
+- **"GPU stall due to ReadPixels" warnings are environmental.** Probes launched without the E2E flags use the real NVIDIA GPU, whose driver logs 4 of them on the first page a fresh browser opens. That happens in 011's build too, and never under SwiftShader (`--use-angle=swiftshader`, as `playwright.config.ts` launches). When checking DoD gate 5 with a probe, launch with the E2E flags (012 T092).
 - Headless Chromium renders WebGL via SwiftShader (software). It's slow, so E2E scenes should allow a `?quality=low` mode; don't assert on FPS in CI.
 
 ## Routing
@@ -75,6 +82,11 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - Guard async outcomes with a sequence number, not just the `superseded` result: an older request can resolve `not-found` after a newer one started and would otherwise overwrite the title. `FakeBrowserLocation` (`tests/helpers/fakes.ts`) mimics all of this for unit tests.
 
 ## DOM / CSS
+
+- **Screenshot every new overlay at 320 px wide.** Independently positioned overlay pieces (credit bottom-left, controls bottom-right, the 012 bottom sheet) collide on phones: the model credit squeezed beside the controls wrapped to four lines and covered the sheet. Absolute siblings can't see each other's size; `.overlay:has(.model-credit) .info` (CSS `:has`) adjusts one piece when another is present.
+
+- **Overlay layers vs focus visibility (012):** markers drawn over the info sheet cluttered its text, but putting them under it hid a Tab-focused marker (WCAG 2.4.11). Children of a `z-index`-less absolute layer join the overlay's stacking context, so `.hotspot:focus-visible { z-index: 2 }` lifts just the focused one above `.info { z-index: 1 }`. Check with `document.elementFromPoint` at the focused element's centre.
+- A popover clamped into a 320 px viewport can land on top of its own anchor when it fits on neither side; fall back to below/above the anchor.
 
 - Removing the focused element (e.g. the gallery card the visitor activated) drops focus to `<body>`, but Chrome keeps the sequential-focus starting point where the removed node was. The next Tab then continues from there, not from the top. SpaceManager now restores lost focus via `SpaceInstance.focusTarget()` (004 AC-13). A same-document `page.goto('#…')` does not reset that starting point either, so it is not a "fresh load" in tests.
 - `element.checkVisibility()` detects focus stranded on a `display: none` element, such as the back link on the gallery. jsdom lacks it, so guard with `typeof … === 'function'`.

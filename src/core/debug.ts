@@ -14,6 +14,10 @@ export interface WorldDebugApi {
   cameraAspect(): number | null;
   /** Snapshot of the active camera (spec 004): position xyz and quaternion xyzw. */
   cameraPose(): { position: number[]; quaternion: number[] } | null;
+  /** The active perspective camera's projection (spec 012): with the pose, enough to project points in tests. */
+  cameraProjection(): { fov: number; aspect: number; near: number; far: number } | null;
+  /** The active Space's hotspot world positions in data order, or [] (spec 012, AC-6). */
+  hotspots(): Array<{ id: string; world: [number, number, number] }>;
   /** Simulates a GPU context loss (spec 005). Call `restoreContext()` only after `data-webgl="lost"`. */
   loseContext(): void;
   restoreContext(): void;
@@ -70,6 +74,13 @@ export function installDebugHook(
     },
     loseContext: () => engine.renderer.forceContextLoss(),
     restoreContext: () => engine.renderer.forceContextRestore(),
+    cameraProjection: () => {
+      const camera = engine.instance?.camera;
+      return camera instanceof PerspectiveCamera
+        ? { fov: camera.fov, aspect: camera.aspect, near: camera.near, far: camera.far }
+        : null;
+    },
+    hotspots: () => engine.instance?.hotspotPositions?.() ?? [],
     cameraAspect: () => {
       const camera = engine.instance?.camera;
       return camera instanceof PerspectiveCamera ? camera.aspect : null;

@@ -58,5 +58,13 @@ export interface CameraControls {
    * there only if the visitor hasn't moved it; `reset()` always returns to the latest home.
    */
   setHome(home: ControlsHome): void;
+  /**
+   * Turns the camera round the focus point to look from `direction` (spec 012, AC-9): eased over `duration`
+   * seconds of Space time (default 0.6), instant under reduced motion. Keeps the distance, stays within the
+   * polar limits, brings a panned view back to the focus, and is cancelled by any visitor input.
+   */
+  turnTo(direction: Vec3, options?: { duration?: number }): void;
+  /** Keeps the idle turntable still (e.g. while an annotation is open); release restarts its idle delay. */
+  holdTurntable(hold: boolean): void;
   dispose(): void;
 }

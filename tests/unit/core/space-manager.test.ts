@@ -677,6 +677,82 @@ describe('SpaceManager', () => {
     });
   });
 
+  describe('info panel (spec 012, AC-1, AC-4, AC-15)', () => {
+    let panels: Array<{
+      id: string;
+      info: { title: string; description: string };
+      dispose: ReturnType<typeof vi.fn>;
+    }>;
+    let withPanel: SpaceManager;
+
+    beforeEach(() => {
+      panels = [];
+      a.meta.title = 'Space A';
+      a.meta.description = 'About A.';
+      withPanel = new SpaceManager({
+        engine,
+        fader,
+        registry: [a.meta, b.meta],
+        reducedMotion: () => false,
+        statusElement: status,
+        infoPanel: (overlay, info) => {
+          expect(overlay).toBe(engine.overlay);
+          const id = engine.instance === null ? '?' : 'mounted';
+          log.push(`panel(${info.title})`);
+          const panel = { id, info, dispose: vi.fn(() => log.push(`panel.dispose(${info.title})`)) };
+          panels.push(panel);
+          return panel;
+        },
+      });
+    });
+
+    it('mounts one with the registry title and description, after the Space built its own UI', async () => {
+      await withPanel.open('a');
+      expect(panels).toHaveLength(1);
+      expect(panels[0]?.info).toEqual({ title: 'Space A', description: 'About A.' });
+      // After the factory, so the panel's prepend puts it before the Space's own overlay DOM.
+      expect(log.indexOf('create(a)')).toBeLessThan(log.indexOf('panel(Space A)'));
+      expect(log.indexOf('panel(Space A)')).toBeLessThan(log.indexOf('fader.in'));
+    });
+
+    it('gives the gallery view none', async () => {
+      const gallery = createSpace('gallery');
+      await withPanel.openView('gallery', (await gallery.meta.load()).default);
+      expect(panels).toHaveLength(0);
+    });
+
+    it('disposes it when another view replaces the Space, and on close() and suspend()', async () => {
+      await withPanel.open('a');
+      await withPanel.open('b');
+      expect(panels[0]?.dispose).toHaveBeenCalledTimes(1);
+      expect(panels).toHaveLength(2);
+
+      await withPanel.close();
+      expect(panels[1]?.dispose).toHaveBeenCalledTimes(1);
+
+      await withPanel.open('a');
+      withPanel.suspend();
+      expect(panels[2]?.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it('creates none for an open that fails or is superseded', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      a.load.mockRejectedValueOnce(new Error('offline'));
+      await expect(withPanel.open('a')).resolves.toBe('load-error');
+
+      const gate = deferred<{ default: SpaceFactory }>();
+      const real = await a.meta.load();
+      a.load.mockReturnValueOnce(gate.promise);
+      const stale = withPanel.open('a');
+      const fresh = withPanel.open('b');
+      gate.resolve(real);
+      await expect(stale).resolves.toBe('superseded');
+      await expect(fresh).resolves.toBe('opened');
+
+      expect(panels.map((panel) => panel.info.title)).toEqual(['b']);
+    });
+  });
+
   describe('status attributes for tests and styling', () => {
     it('removes data-space-ready when opening starts and sets it with data-space-id when done', async () => {
       await manager.open('a');

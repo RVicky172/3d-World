@@ -4,14 +4,14 @@
 
 ## Current State (2026-10-05)
 
-- **Phase:** 2 (Single-Object Showcase): **010 ✔️, 011 ✔️**; 012 (info panel: title, description, hotspots/annotations) is next on the roadmap.
-- **Active feature:** none. Next: `/spec-new` for **012**.
-- **Last done:** **011-asset-pipeline is Implemented** (2026-10-05), **not yet committed**:
-  - 15 ACs verified; 475 unit + 99 E2E (~44 s at 4 workers); entry 145.6 KB (+0.8 KB).
-  - Chair 4.1 → 1.26 MB (Meshopt + KTX2 via `npm run assets`; originals in `assets-src/`); Space 1.86 MB incl. the 571 KB transcoder.
-  - Download progress bar + %, spoken at 25/50/75 %, then "<title> loaded" (D-019); decoder failure → "Failed to load"; workers freed after load.
-  - Decisions D-017 (choices), D-018 (+ sharp addendum, tooling), D-019 (pixel-diff parity ≤ 2.0, "loaded" announcement).
-- **Next step:** commit 011 (`feat(011): asset pipeline`), then `/spec-new` 012. Measure the entry again in 012 (145.6 KB of 250 KB used).
+- **Phase:** 2 (Single-Object Showcase) **complete: 010 ✔️, 011 ✔️, 012 ✔️**. Phase 3 (Solar System, 020–023) is next on the roadmap.
+- **Active feature:** none. 012 is **Implemented** but **not yet committed** (all work is in the working tree).
+- **Last done:** **012-info-panel is Implemented** (2026-10-05):
+  - 17 ACs verified; 560 unit + 129 E2E (~1.1 min at 4 workers); entry 146.0 KB (+0.4 KB of the 3 KB cap); chair 1.87 MB.
+  - Info panel in every Space (core; registry strings; collapse remembered in `localStorage`; side panel / bottom sheet).
+  - Hotspots (`src/shared/hotspots/`): markers within 4 px, dimmed when hidden (own any-hit occlusion, D-021), annotation turns the camera (`turnTo`) and pauses the turntable (`holdTurntable`). Chair: seat, frame, legs, label.
+  - Decisions D-020 (choices), D-021 (copy after the probe, occlusion test). Architecture doc updated.
+- **Next step:** commit 012 when the lead asks (`feat(012): info panel and hotspots`), then `/spec-new 020`. Open question to the lead: the chair's registry description says "armchair" but it has no arms.
 - **Blockers:** none
 
 ## Files

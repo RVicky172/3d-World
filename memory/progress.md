@@ -11,6 +11,33 @@ Newest first. One entry per working session.
 
 ---
 
+## 2026-10-05 — 012-info-panel ✔️ Implemented
+
+**Done:**
+
+- 011 committed and pushed (`2189380`).
+- 012 spec drafted; Q1–Q7 answered (D-020: panel open + remembered, side/bottom sheet; dimmed occluded markers; hotspot turns the camera; 4 chair hotspots; no deep links; turntable pauses; entry ≤ 3 KB). Plan approved with drafted hotspot copy; 30 tasks.
+- T001: a realistic panel + preferences in the entry and `Raycaster` lazy → +0.7 KB.
+- T010–T013: `src/core/preferences.ts` (JSON in localStorage, never throws, even when reading `window.localStorage` throws) and `src/ui/info-panel.ts` (a region named by its h2, a toggle with `aria-expanded`, "Hide info"/"About <title>", prepended). CSS: side panel above 640 px, bottom sheet ≤ 35vh below it, hint moved to the top on narrow screens.
+- T014–T015: `SpaceManager` option `infoPanel`, created after the factory (with registry title + description) and disposed in `release()`; wired in `main.ts` with the preference. One E2E updated (Tab order). Screenshots caught the 010 credit wrapping over the sheet on phones; the credit now gets its own line on narrow screens. 491 unit + 99 E2E green; entry 146.0 KB.
+
+- T020–T023: `src/shared/controls/turn.ts` (`easeTurn` smoothstep; `turnStep` great-circle rotation, fixed perpendicular for opposite directions). Turntable `hold()`: release restarts the idle delay. Controls `turnTo(direction, { duration = 0.6 })`: flushes damping, clamps polar, eases the direction and the target back to the focus at a fixed distance, advanced in `update(delta)`, instant under reduced motion, cancelled by any input, sets `userMoved`. `holdTurntable(hold)`. 509 unit + 99 E2E green.
+
+- T030–T035: `src/shared/hotspots/` — `toScreen()` (projection), `createOcclusion()` (raycasts only after the camera moves, ≤ every 0.1 s), `createHotspots()` (buttons in a `.hotspots` layer, read-then-write per frame and nothing written when nothing changed; dimmed = `disabled` + `.is-dimmed`, focus falls back to the canvas; one annotation in an always-present polite live region; `turnTo` + `holdTurntable`; Escape on the layer). CSS for markers (44 px hit area) and annotation. Plan updated for the live-region wrapper and the Escape scope. 538 unit + 99 E2E green (one `subpath` run hit `ERR_CONNECTION_REFUSED` once; passed 3/3 alone and on a full rerun).
+
+- T040: probe (component split of the source GLB + a throwaway page rendering the shipped chair via the real loader). No arms, wooden legs, metal = bolts + glides, printed label → AC-5 and copy revised, approved (D-021). Positions/views in `tasks.md`. `Raycaster` occlusion = 8.2 ms per pass → own any-hit test over a world-space Float32Array (0.7 ms), approved (D-021); `occlusion.ts` reworked test-first (+ transformed, quantized, non-indexed, double-sided, dispose cases). 542 unit green.
+
+- T041–T045: viewer mounts hotspots before the controls (proxy to `controls` for `turnTo`/`holdTurntable`), updates them after `controls.update()`, resizes and disposes them; `SpaceInstance.hotspotPositions?()`. Chair data: 4 hotspots (D-021), unit-checked against the source GLB bounds via glTF-Transform. Screenshots at 1280 and 320 px: markers covered the sheet, and on phones the annotation landed on its own marker → annotation goes below/above when neither side fits; markers under `.info` (z 1) except focused/open ones (z 2, WCAG 2.4.11), annotation z 2. `__WORLD__.hotspots()` + `cameraProjection()`. 560 unit + 99 E2E green; entry 146.0 KB; chair 1.87 MB.
+
+- T050: `tests/e2e/info-panel.spec.ts` (12 tests: card strings, remembered collapse across reload/Spaces/fresh context, mouse/keyboard/touch toggle, drag+wheel on the panel, sheet ≤ 35 % and clear of hint/controls/credit at 320 and 375 px with screenshots, collapsed framing, region name, full Tab sequence on the chair, demo-cube without markers). Sabotage-checked (preference ignored, panel letting pointers through, sheet over the controls row). 560 unit + 111 E2E green.
+
+- T051–T053: `tests/e2e/hotspots.spec.ts` (18 tests). Markers within 4 px of points projected in Node (three) from `cameraPose()` + `cameraProjection()` + `hotspots()` read in one evaluate: home, orbit, zoom, pan, 320×640, resize, mid-turntable. Dimming at front/back/below (proves raycasts on the Meshopt chair). Tab order + focus ring, arrows only on the canvas. Activation: polite annotation, one at a time, Escape/Close/marker close with focus back, instant and eased turns, Reset home, 44 px targets, drag from a marker vs between markers, touch tap. Turntable paused beyond its idle delay, resumes after close. 10 round trips (DOM + GPU memory) and context loss/restore. Gotchas: Playwright's stable-element wait stalled clicks on moving markers 9 s (`force: true`); a 600 ms pause check was vacuous (turnTo restarts the idle delay); the lazy loading announcer. All sabotage-checked. 560 unit + 129 E2E green (twice).
+
+- T090–T092: `specs/architecture.md` (info panel, hotspots, `turnTo`/`holdTurntable`, Tab order, stacking, seams). Full gate: Prettier clean, 560 unit + 129 E2E, build OK; entry 146.0 KB, chair 1.87 MB, `__WORLD__` absent. DoD gate 5 probe on the production build: no warnings or errors under SwiftShader. Without the E2E flags the NVIDIA driver logs "GPU stall due to ReadPixels" on a browser's first page, identically in a worktree build of 011 (`2189380`), so it's environmental (learnings). All 17 ACs ticked; spec Implemented; roadmap 012 ✔️ (Phase 2 complete).
+
+**Next:** commit 012 when asked; then Phase 3 (`/spec-new 020`). Open question: "armchair" in the chair's registry description.
+**Blockers:** none
+
 ## 2026-10-05 — 011-asset-pipeline ✔️ Implemented
 
 **Done:**

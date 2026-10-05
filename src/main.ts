@@ -2,6 +2,7 @@ import { Color, WebGLRenderer } from 'three';
 import './styles/main.css';
 import { createRendererOrNull, hasWebGL2, watchReducedMotion } from './core/capabilities';
 import { installDebugHook } from './core/debug';
+import { readPreference, writePreference } from './core/preferences';
 import { ContextGuard } from './core/context-guard';
 import { Engine } from './core/engine';
 import { HashRouter } from './core/router';
@@ -10,6 +11,7 @@ import { createGalleryView } from './gallery';
 import { findSpace, spaces } from './spaces/registry';
 import { createBackLink } from './ui/back-link';
 import { Fader } from './ui/fader';
+import { createInfoPanel } from './ui/info-panel';
 import { createLoadingIndicator } from './ui/loading';
 import { renderWebGLFallback } from './ui/fallback';
 
@@ -39,7 +41,14 @@ function startApp(app: HTMLElement, renderer: WebGLRenderer): void {
   const fader = new Fader(app, { reducedMotion, covered: true });
   // "Loading <title>…" above the fader for slow opens (spec 010, AC-8).
   const loading = createLoadingIndicator(app);
-  const manager = new SpaceManager({ engine, fader, reducedMotion, loading });
+  // Every Space's title and description in the view (spec 012); open/collapsed is remembered (D-020).
+  const PANEL_OPEN = 'world.infoPanel.open';
+  const infoPanel = (overlay: HTMLElement, info: { title: string; description: string }) =>
+    createInfoPanel(overlay, info, {
+      open: readPreference(PANEL_OPEN, true),
+      onToggle: (open) => writePreference(PANEL_OPEN, open),
+    });
+  const manager = new SpaceManager({ engine, fader, reducedMotion, loading, infoPanel });
   // Home page (spec 003): a view built from registry metadata only, so no Space code loads here.
   const gallery = createGalleryView({ spaces, baseUrl: import.meta.env.BASE_URL });
   createBackLink(app);

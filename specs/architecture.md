@@ -27,9 +27,10 @@
 
 ```text
 src/
-  main.ts                 # bootstrap: WebGL check + renderer (or fallback) → startApp(): motion watcher → Engine → Fader → loading indicator → SpaceManager → gallery view + back link → ContextGuard → HashRouter.start()
+  main.ts                 # bootstrap: WebGL check + renderer (or fallback) → startApp(): motion watcher → Engine → Fader → loading indicator → info panel + preference → SpaceManager → gallery view + back link → ContextGuard → HashRouter.start()
   core/
     progress.ts           # pure: clampProgress(), announcementFor() — download progress rules (011)
+    preferences.ts        # readPreference()/writePreference(): JSON in localStorage, never throws (012)
     types.ts              # the Space contract + RendererLike + OpenResult
     clock.ts              # Clock, createClock(), FakeClock: timestamps → { delta, elapsed }
     render-loop.ts        # RenderLoop: injectable Scheduler + VisibilitySource; pauses when hidden
@@ -44,7 +45,8 @@ src/
     controls/
       index.ts            # createCameraControls(): OrbitControls + our keyboard + limits + turntable + UI
       keyboard.ts         # keyAction() mapping; orbitStep/zoomStep/panStep (pure Spherical maths)
-      turntable.ts        # idle auto-orbit state, advanced only by delta
+      turntable.ts        # idle auto-orbit state, advanced only by delta; hold() (012)
+      turn.ts             # pure: easeTurn(), turnStep() — great-circle turn of a view direction (012)
       controls-ui.ts      # fading hint, "?" help disclosure, "Reset view" button
       types.ts            # CameraControlsConfig, CameraControlsOptions, CameraControls
     model-viewer/
@@ -53,6 +55,11 @@ src/
       framing.ts          # pure: frameDistance(), distanceLimits(), fitModel()
       credit.ts           # visible asset credit line (.model-credit)
       types.ts            # ModelViewerConfig, AssetCredit (SPDX licence ids)
+    hotspots/
+      index.ts            # createHotspots(): marker buttons, one annotation, per-frame placement + dimming (012)
+      projection.ts       # pure: toScreen() — world point → CSS px of the canvas, visible flag
+      occlusion.ts        # createOcclusion(): throttled any-hit ray test over a world-space triangle copy (D-021)
+      types.ts            # HotspotConfig
     dispose.ts            # disposeObject3D(): geometries, materials, textures (incl. uniforms, background)
   gallery/
     index.ts              # createGalleryView(): the gallery as a SpaceFactory (cards in overlay, starfield in scene)
@@ -65,11 +72,12 @@ src/
     fallback.ts           # WebGL2-unavailable screen (sets data-webgl="unavailable")
     context-lost.ts       # "The 3D view stopped" alert with a Reload button (005)
     loading.ts            # createLoadingIndicator(): "Loading <title>…", bar + % (011), "<title> loaded" announcer
+    info-panel.ts         # createInfoPanel(): the Space's title + description, collapsible region (012)
   spaces/
     registry.ts           # spaces[] with lazy loaders, findSpace()
     <space-id>/
       index.ts            # default-exports a SpaceFactory; scene data as a typed config object
-      data.ts             # typed scene data (e.g. sheen-chair: ModelViewerConfig)
+      data.ts             # typed scene data (e.g. sheen-chair: ModelViewerConfig, incl. hotspots)
   styles/main.css         # tokens; stacking: canvas → .overlay → .fader → .loading / .context-lost → .back-to-gallery
 scripts/
   bundle-checks.mjs       # pure bundle rules (unit-tested): entry budget, per-Space 5 MB (code + assets + emitted decoders)
@@ -114,6 +122,7 @@ export interface SpaceInstance {
   resize(width: number, height: number): void; // update camera aspect etc.; never called with 0
   render?(): void; // opt-in custom rendering (e.g. EffectComposer)
   focusTarget?(context: { previousSpaceId: string | null }): HTMLElement | null; // where focus lands on a switch (004 AC-13)
+  hotspotPositions?(): Array<{ id: string; world: [number, number, number] }>; // test seam (012 AC-6)
   dispose(): void; // free GPU + DOM + listeners
 }
 
@@ -178,6 +187,7 @@ open(B) / openView('gallery', f)
   → B = await factory(ctx)            throws  → show "Failed to load"           → 'load-error'
                                       (a model Space downloads its GLB here, so asset errors land here too;
                                        ctx.reportProgress(f) moves the indicator's bar, 011)
+  → registry Space: infoPanel(overlay, { title, description }) from the registry, prepended (012)
   → loading.ready() if it was shown   says "<title> loaded" (011, D-019); else just hide()
                                       failures, supersession, suspend() and close() always hide() silently
   → engine.setInstance(B) → restore lost focus (not on the first view) → await engine.nextFrame() → fader.in()
@@ -195,6 +205,10 @@ open(B) / openView('gallery', f)
   it had just created. Rapid switching therefore always ends on the most recent request.
 - **Never throws:** `open()` reports every failure through its result. Load and factory errors are also sent to
   `console.error`. An unknown id is not treated as an error (decision D-006).
+- **Info panel (012, AC-1–AC-4):** optional `infoPanel` factory, called after a registry Space's factory with
+  its **registry** title and description (the gallery card's strings, so they can't drift). The panel prepends
+  itself to the overlay, so its toggle follows the 3D view in Tab order. `release()` disposes it with the view: on
+  unmount, failure, supersession, `suspend()` and `close()`. The gallery gets none. See Info Panel below.
 - **`close()`:** disposes the active Space, clears any message, and cancels any `open()` that is still running.
 - **Loading indicator (010, AC-8):** optional `loading` (from `createLoadingIndicator()`) and `loadingDelayMs`
   (default 250 ms). The timer starts **after** the fade-out, so ordinary fades never show it, and a view that is
@@ -217,7 +231,8 @@ open(B) / openView('gallery', f)
 - **DOM order inside `#app`:** back link → canvas → overlay → fader. The back link is prepended so that Tab order
   matches the layout (back link → 3D view → view controls); z-index, not DOM order, decides what is drawn on top.
 - **Stacking inside `#app`:** canvas → `.overlay` (z 1, the view's DOM: gallery cards, Space UI, messages) →
-  `.fader` (z 2) → `.loading` and `.context-lost` (z 3, 010/005) → `.back-to-gallery` (z 4). The fader hides the whole view, both its 3D and its DOM, while
+  `.fader` (z 2) → `.loading` and `.context-lost` (z 3, 010/005) → `.back-to-gallery` (z 4). Inside the overlay
+  (012): hotspot markers → `.info` (z 1) → a focused or open marker and the annotation (z 2). The fader hides the whole view, both its 3D and its DOM, while
   switching, so nothing half-removed is ever visible. Steady chrome sits above it.
 - It starts covered at boot, so the first Space only fades in.
 - With `prefers-reduced-motion`, swaps are instant. The preference is read on every fade, so a change made while the
@@ -321,6 +336,13 @@ label, config })` in its factory. It calls `controls.update(delta)` from `update
 - **Turntable:** an idle auto-orbit through `autoRotate` + `update(delta)`, so it is deterministic by Space time.
   - It stops on any interaction (the controls' `start`/`end` events, keys, reset) and resumes after `idleDelay`.
   - It is off under reduced motion, as is damping.
+- **`turnTo(direction, { duration = 0.6 })` (012, AC-9):** turns the camera round the focus to look from
+  `direction` at the current distance, clamped to the polar limits; a panned target eases back to the focus.
+  Pure maths in `turn.ts` (`turnStep`: great-circle rotation with smoothstep easing, a fixed perpendicular for
+  opposite directions). Advanced in `update(delta)`, instant under reduced motion, cancelled by any input or
+  `reset()`, and it sets `userMoved`. It counts as an interaction, so the turntable's idle delay restarts.
+- **`holdTurntable(hold)` (012, AC-12):** keeps the turntable idle while held (an open annotation); releasing
+  restarts the idle delay.
 - **Reset:** flush in-flight damping (one `update()` with damping off), then `OrbitControls.reset()` to the saved
   initial state. Without the flush, the reset drifts.
 - **UI (`ctx.overlay`):**
@@ -342,7 +364,11 @@ shared `three` module (+8.3 KB entry, D-013).
 
 - **Order:** load the GLB from `BASE_URL + model.path` **first**, so a failed download allocates nothing and
   rejects into "Failed to load" (AC-9). The loader is disposed as soon as loading settles (011) → `fitModel()` centres the model on the origin and returns its
-  bounding-sphere radius `r` → studio environment → camera + shared controls → credit line.
+  bounding-sphere radius `r` → studio environment → camera → hotspots (if the data has any, 012) → shared
+  controls → credit line. The hotspot layer goes in before the controls so markers precede "?" and "Reset view"
+  in Tab order; it reaches the controls through a small proxy, used only once both exist.
+- **Per frame:** `controls.update(delta)`, then `hotspots.update(delta)`, so markers match this frame's camera.
+  `resize()` also resizes the hotspots; `dispose()` disposes them first.
 - **Framing (pure, `framing.ts`):** `frameDistance(r, fovY, aspect, fill)` puts the sphere at `fill` of the
   smaller viewport dimension (portrait by width, landscape by height). Limits: `min = 1.2 r` (never inside),
   `max = frameDistance(…, 0.1)` (the sphere never below 10 %, D-016). Near/far planes are `r/100` and `100 r`.
@@ -371,7 +397,61 @@ shared `three` module (+8.3 KB entry, D-013).
     once (KTX2Loader warns about that).
 - **Budget:** `check-bundle.mjs` sums each Space's own lazy code (gzipped), `public/assets/<id>/`, and the files
   its lazy chunks emit (the transcoder, stored size, since hosts may not gzip `.wasm`), and fails the build over
-  5 MB (010 AC-12, 011 AC-6). sheen-chair: 52 KB + 1.26 MB + 571 KB = 1.86 MB.
+  5 MB (010 AC-12, 011 AC-6). sheen-chair: 55 KB + 1.26 MB + 571 KB = 1.87 MB (012).
+
+## Info Panel (`src/ui/info-panel.ts`, 012)
+
+Every registry Space shows its title and description without leaving the view (AC-1). It lives in the core (the
+SpaceManager mounts it), so a Space can't forget it.
+
+- **DOM:** `.info` holds a toggle `<button aria-expanded aria-controls>` and a `<section aria-labelledby>` region
+  with the title as `<h2>` and the description as `<p>`. The toggle reads "Hide info" when open and
+  "About <title>" when collapsed, so the title stays reachable. State lives in `aria-expanded` (TypeScript types
+  `hidden` as `boolean | "until-found"`).
+- **Remembered choice:** `main.ts` passes `open: readPreference('world.infoPanel.open', true)` and writes on
+  toggle. `src/core/preferences.ts` stores JSON in `localStorage`, wrapped in try/catch; any failure falls back.
+  The project's only `localStorage` use: a UI preference (Constitution II).
+- **Layout (CSS only):** above 640 px, a side panel top-right, `min(20rem, 40vw)` wide. At or below it, a bottom
+  sheet above the controls row (`bottom: 72px`, raised above a model credit with `.overlay:has(.model-credit)`,
+  `max-height: 35vh`), and the controls hint moves to the top (AC-3). Only the toggle and card take pointer
+  events, so the panel never moves the camera.
+
+## Hotspots (`src/shared/hotspots/`, 012)
+
+Markers on points of a model that open short annotations (AC-5–AC-12). Data: `HotspotConfig { id, title, text,
+position, view }` in the Space's `data.ts`; `position` is in the model's own (glTF) coordinates, so it survives
+`fitModel()` centring, and `view` is the direction to look from. Array order is the Tab order.
+
+- **Markers:** one `<button class="hotspot" aria-label="Hotspot: <title>" aria-expanded aria-controls>` each,
+  a 44 px hit area around an 18 px dot, in a `.hotspots` layer with `pointer-events: none` (drags between markers
+  reach the 3D view, AC-11).
+- **Per frame (`update(delta)`):** `camera.updateMatrixWorld()` first (the controls move the camera but not its
+  matrix). If the camera, projection, size or occlusion changed: project every point (`toScreen()`, read
+  phase), then write only what changed (`transform: translate(x, y)`, `hidden`, dimming). Nothing is written
+  otherwise. Points behind the camera are hidden.
+- **Occlusion (AC-7, D-021):** a ray from the camera to each point stops `0.01 r` short of it; any hit means
+  the model hides it. three's `Raycaster` took 8.2 ms per pass on the chair, so `occlusion.ts` copies the
+  model's triangles once into a world-space `Float32Array` (the model holds still, D-009; 1.4 MB for the chair,
+  dropped on dispose) and runs an early-exit, double-sided Möller–Trumbore test: 0.7 ms per pass. It runs only
+  after the camera moves, at most every 0.1 s of Space time. Hidden points' markers get `disabled` +
+  `.is-dimmed`: visible, not focusable, drags pass through. If the focused marker dims, focus moves to the canvas.
+- **Annotation (AC-8):** one `<section class="hotspot-annotation" aria-labelledby>` (title `<h3>`, text, Close)
+  inside an always-present `aria-live="polite"` wrapper, which the markers' `aria-controls` point at. It sits
+  beside its marker, or below/above it when neither side fits (phones), clamped into the viewport, and follows
+  the marker. Its size is read once per open.
+- **Activation:** open → `controls.turnTo(view)` + `holdTurntable(true)`; opening another keeps the hold. Close
+  (Escape on the layer, Close, or the marker again) → `holdTurntable(false)` and focus back to the marker (or
+  the canvas if it has dimmed).
+- **Stacking:** markers sit under `.info`; a focused or open marker comes above it, so focus is never hidden
+  (WCAG 2.4.11); the annotation is on top.
+- **Lifecycle:** `dispose()` aborts listeners (also on `ctx.signal`), removes the layer and drops the triangle
+  copy. No GPU resources: markers are DOM.
+
+## Tab Order inside a Space (004, 012)
+
+Back link → 3D view (canvas) → info panel toggle → hotspot markers that aren't dimmed, in data order → the open
+annotation's Close → "?" → "Reset view" → the model credit's link. The core prepends the panel; the viewer adds
+the hotspot layer before the controls; the credit is appended last.
 
 ## Asset Pipeline (`npm run assets`, 011)
 
@@ -434,31 +514,34 @@ composers.
 
 ## Testability Seams
 
-| Seam                          | Real                                                       | In tests                                                                               |
-| ----------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Time                          | `createClock()`                                            | `FakeClock`                                                                            |
-| Frames                        | `requestAnimationFrame`                                    | `FakeScheduler.flush(now)`                                                             |
-| Visibility                    | `document`                                                 | `FakeVisibility.set('hidden')`                                                         |
-| Renderer (Engine)             | `WebGLRenderer`                                            | `createFakeRenderer()` (`RendererLike`)                                                |
-| Resize                        | `ResizeObserver`                                           | injected `watchResize` callback                                                        |
-| Space context                 | built by `SpaceManager`                                    | `createFakeContext()`                                                                  |
-| Engine/Fader (Manager)        | `Engine`, `Fader`                                          | `ManagedEngine`, `Transition` fakes                                                    |
-| URL + history (Router)        | `window.location`, `window.history`, `window`              | `FakeBrowserLocation` (all three in one)                                               |
-| Camera controls (unit)        | OrbitControls on the real canvas                           | real OrbitControls on a jsdom canvas; keyboard/wheel events; `FakeClock`-style deltas  |
-| Touch input (E2E)             | fingers                                                    | `touchGesture()`: CDP `Input.dispatchTouchEvent` (Chromium)                            |
-| Gallery (unit)                | `createGalleryView` in `main.ts`                           | injected test registry; `createFakeContext()`                                          |
-| Sub-path hosting (E2E)        | GitHub Pages `/3d-World/`                                  | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174                |
-| Running app (E2E)             | —                                                          | `window.__WORLD__` in `npm run build:test` builds                                      |
-| Context loss                  | GPU/driver reset on the renderer's canvas                  | unit: `EventTarget` canvas + fake engine/manager; E2E: `__WORLD__.loseContext()`       |
-| Motion preference             | `matchMedia('(prefers-reduced-motion: reduce)')`           | unit: fake `MediaQueryList` (`EventTarget` + `matches`); E2E: `page.emulateMedia()`    |
-| No WebGL2 / no renderer (E2E) | the browser                                                | init script patching `HTMLCanvasElement.prototype.getContext`                          |
-| Model loading (unit)          | `createGltfLoader`, PMREM studio environment, BASE_URL     | `ModelViewerDeps`: stub `createLoader`, `createEnvironment`, `baseUrl`                 |
-| Loader parts (unit)           | `FileLoader`, `KTX2Loader`, `GLTFLoader`, `MeshoptDecoder` | `LoaderParts` fakes passed to `createGltfLoader(renderer, parts)`                      |
-| Download progress (E2E)       | a slow network                                             | CDP `Network.emulateNetworkConditions` + a MutationObserver log                        |
-| Decoder workers (E2E)         | KTX2Loader's worker pool                                   | `page.workers()` / `page.on('worker')`                                                 |
-| Visual parity (E2E)           | the original model                                         | `page.route` serving `assets-src/…`; `canvasRgba()` + `meanPixelDifference()`          |
-| Slow / failed download (E2E)  | the network                                                | `page.route()` delaying or aborting the GLB, the transcoder, or serving a corrupt file |
-| Framing and lighting (E2E)    | what the visitor sees                                      | `contentBounds()`: drawing-buffer bounds, fill of the smaller side, mean luminance     |
+| Seam                          | Real                                                       | In tests                                                                                     |
+| ----------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Time                          | `createClock()`                                            | `FakeClock`                                                                                  |
+| Frames                        | `requestAnimationFrame`                                    | `FakeScheduler.flush(now)`                                                                   |
+| Visibility                    | `document`                                                 | `FakeVisibility.set('hidden')`                                                               |
+| Renderer (Engine)             | `WebGLRenderer`                                            | `createFakeRenderer()` (`RendererLike`)                                                      |
+| Resize                        | `ResizeObserver`                                           | injected `watchResize` callback                                                              |
+| Space context                 | built by `SpaceManager`                                    | `createFakeContext()`                                                                        |
+| Engine/Fader (Manager)        | `Engine`, `Fader`                                          | `ManagedEngine`, `Transition` fakes                                                          |
+| URL + history (Router)        | `window.location`, `window.history`, `window`              | `FakeBrowserLocation` (all three in one)                                                     |
+| Camera controls (unit)        | OrbitControls on the real canvas                           | real OrbitControls on a jsdom canvas; keyboard/wheel events; `FakeClock`-style deltas        |
+| Touch input (E2E)             | fingers                                                    | `touchGesture()`: CDP `Input.dispatchTouchEvent` (Chromium)                                  |
+| Gallery (unit)                | `createGalleryView` in `main.ts`                           | injected test registry; `createFakeContext()`                                                |
+| Sub-path hosting (E2E)        | GitHub Pages `/3d-World/`                                  | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174                      |
+| Running app (E2E)             | —                                                          | `window.__WORLD__` in `npm run build:test` builds                                            |
+| Context loss                  | GPU/driver reset on the renderer's canvas                  | unit: `EventTarget` canvas + fake engine/manager; E2E: `__WORLD__.loseContext()`             |
+| Motion preference             | `matchMedia('(prefers-reduced-motion: reduce)')`           | unit: fake `MediaQueryList` (`EventTarget` + `matches`); E2E: `page.emulateMedia()`          |
+| No WebGL2 / no renderer (E2E) | the browser                                                | init script patching `HTMLCanvasElement.prototype.getContext`                                |
+| Model loading (unit)          | `createGltfLoader`, PMREM studio environment, BASE_URL     | `ModelViewerDeps`: stub `createLoader`, `createEnvironment`, `baseUrl`                       |
+| Loader parts (unit)           | `FileLoader`, `KTX2Loader`, `GLTFLoader`, `MeshoptDecoder` | `LoaderParts` fakes passed to `createGltfLoader(renderer, parts)`                            |
+| Download progress (E2E)       | a slow network                                             | CDP `Network.emulateNetworkConditions` + a MutationObserver log                              |
+| Decoder workers (E2E)         | KTX2Loader's worker pool                                   | `page.workers()` / `page.on('worker')`                                                       |
+| Visual parity (E2E)           | the original model                                         | `page.route` serving `assets-src/…`; `canvasRgba()` + `meanPixelDifference()`                |
+| Slow / failed download (E2E)  | the network                                                | `page.route()` delaying or aborting the GLB, the transcoder, or serving a corrupt file       |
+| Framing and lighting (E2E)    | what the visitor sees                                      | `contentBounds()`: drawing-buffer bounds, fill of the smaller side, mean luminance           |
+| Preferences (unit)            | `window.localStorage`                                      | an injected `Storage` (incl. one that throws)                                                |
+| Marker placement (E2E)        | the hotspot module's own projection                        | `__WORLD__.hotspots()` + `cameraPose()` + `cameraProjection()`, projected with three in Node |
+| Hotspot controls (unit)       | `turnTo` / `holdTurntable` of the shared controls          | `vi.fn()` controls; real camera and three meshes for occlusion                               |
 
 `window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory`, `cameraAspect`, `cameraPose`, and
 `loseContext` / `restoreContext` (three's `forceContextLoss/Restore`; restore only after `data-webgl="lost"`). It is installed behind a

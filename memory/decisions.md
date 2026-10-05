@@ -160,3 +160,30 @@ Format:
 
 **Alternatives:** Replace the brightness rule with the pixel diff alone; keep AC-2 as it was (it only catches large shifts). For AC-9: reword it to limit announcements to the three steps, with no "loaded" message.
 **Consequences:** The parity E2E reads full pixel arrays from both renders (it's the slowest test in the spec). The loading indicator gains `ready()`, and `SpaceManager` calls it instead of `hide()` after a shown, successful load.
+
+## D-020 — Info panel and hotspot choices for 012 (2026-10-05)
+
+**Context:** Spec 012 open questions Q1–Q7.
+**Decision (project lead):**
+
+1. The info panel opens the first time; the visitor's collapse/expand choice is remembered in `localStorage` across Spaces and visits. It's a side panel on wide screens and a bottom sheet on phones.
+2. Markers whose point is behind the model are **dimmed** (visible, not activatable or focusable).
+3. Activating a hotspot **turns the camera** to its stored viewing direction (instant under reduced motion), then opens the annotation.
+4. The chair gets **four** hotspots (seat, legs, frame and arms, label), with copy drafted by the agent for review.
+5. Deep links to hotspots are **out of scope**.
+6. The idle turntable **pauses** while an annotation is open.
+7. The entry-growth cap is **≤ 3 KB gzipped**, fixed.
+
+**Alternatives:** Collapsed by default, or not remembered; hiding occluded markers; text-only activation; 3 hotspots or user-written copy; hotspot deep links; letting the turntable keep turning; a spike-set cap or the total budget only.
+**Consequences:** The shared controls need a camera "turn to" capability and a way to hold the turntable. Each hotspot stores a viewing direction. The first `localStorage` use in the project (preferences only, wrapped in try/catch).
+
+## D-021 — Chair hotspot copy and own occlusion test for 012 (2026-10-05)
+
+**Context:** The 012 T040 probe found that the Sheen Chair has no arms, that its legs are wood (the metal is twenty ~1 cm bolt heads at the joints plus four floor glides), and that the label is printed. So the drafted copy ("Metal base", "frame shapes the arms") and AC-5's "wooden frame and arms" were wrong. It also measured one occlusion pass (4 rays, ~40k triangles) with three's `Raycaster` at **8.2 ms** median, against a 1 ms/frame NFR. The plan's fallbacks (box pre-check, one hotspot per tick) can't close that gap: `Mesh.raycast` already box-checks, and one ray costs ~2 ms.
+**Decision (project lead):**
+
+1. Hotspots: velvet seat, wooden frame, wooden legs, printed label, with the revised copy in the 012 plan. AC-5 drops "arms".
+2. Occlusion uses an **own any-hit ray test**: the model's triangles are copied once into a world-space `Float32Array`, and an early-exit Möller–Trumbore loop checks each ray. Measured 0.7 ms median / 1.0 ms max per pass, with the same answers as `Raycaster`.
+
+**Alternatives:** For the copy, user-written wording. For occlusion, `three-mesh-bvh` (a new runtime dependency); or keeping `Raycaster` and relaxing the NFR.
+**Consequences:** About 60 lines of geometry code in `src/shared/hotspots/occlusion.ts` with unit tests. 1.4 MB of CPU memory per chair visit, freed on dispose. The copy relies on the model holding still (D-009); a moving model would need the copy rebuilt.

@@ -47,6 +47,11 @@ export interface SpaceManagerOptions {
   statusElement?: HTMLElement;
   loading?: LoadingIndicator;
   loadingDelayMs?: number;
+  /**
+   * Builds the info panel shown in every registry Space (spec 012, AC-1): called with the Space's registry
+   * title and description once its factory has built the view, and disposed with the view. Not for the gallery.
+   */
+  infoPanel?: (overlay: HTMLElement, info: { title: string; description: string }) => { dispose(): void };
 }
 
 interface Mounted {
@@ -57,6 +62,8 @@ interface Mounted {
   label: string;
   instance: SpaceInstance;
   controller: AbortController;
+  /** The core's info panel for registry Spaces (spec 012). */
+  panel: { dispose(): void } | null;
 }
 
 type FactorySource = () => Promise<SpaceFactory | 'not-found'>;
@@ -84,6 +91,7 @@ export class SpaceManager {
   private mounted: Mounted | null = null;
   private target: Target | null = null;
   private readonly loading: LoadingIndicator | null;
+  private readonly infoPanel: SpaceManagerOptions['infoPanel'] | null;
   private readonly loadingDelayMs: number;
   /** The request whose loading timer is pending or whose indicator is showing, and its latest progress. */
   private loadingFor: {
@@ -103,6 +111,7 @@ export class SpaceManager {
     this.registry = options.registry ?? spaces;
     this.status = options.statusElement ?? document.body;
     this.loading = options.loading ?? null;
+    this.infoPanel = options.infoPanel ?? null;
     this.loadingDelayMs = options.loadingDelayMs ?? LOADING_DELAY_MS;
   }
 
@@ -221,11 +230,17 @@ export class SpaceManager {
       return this.fail('load-error', label, error);
     }
     if (isStale()) {
-      this.release({ view, id, label, instance, controller });
+      this.release({ view, id, label, instance, controller, panel: null });
       return 'superseded';
     }
 
-    this.mounted = { view, id, label, instance, controller };
+    // After the factory: the panel prepends itself, so it lands before the Space's own UI in Tab order (AC-4).
+    const meta = id === null ? undefined : findSpace(id, this.registry);
+    const panel =
+      meta && this.infoPanel
+        ? this.infoPanel(this.engine.overlay, { title: meta.title, description: meta.description })
+        : null;
+    this.mounted = { view, id, label, instance, controller, panel };
     this.engine.setInstance(instance);
     if (this.hasMounted) restoreLostFocus(instance, previousSpaceId);
     this.hasMounted = true;
@@ -260,8 +275,9 @@ export class SpaceManager {
   }
 
   /** Abort first so listeners are gone before the view tears down its scene. */
-  private release({ label, instance, controller }: Mounted): void {
+  private release({ label, instance, controller, panel }: Mounted): void {
     controller.abort();
+    panel?.dispose();
     try {
       instance.dispose();
     } catch (error) {

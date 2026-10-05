@@ -1,13 +1,16 @@
-import { Vector3 } from 'three';
+import { Spherical, Vector3 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createControlsUi } from './controls-ui';
 import { keyAction, orbitStep, panStep, zoomStep, type KeyAction } from './keyboard';
+import { easeTurn, turnStep } from './turn';
 import { Turntable } from './turntable';
 import type { CameraControls, CameraControlsOptions, ControlsHome } from './types';
 
 export type { CameraControls, CameraControlsConfig, CameraControlsOptions, ControlsHome } from './types';
 
 const DAMPING = 0.08;
+/** Default length of a `turnTo()` (spec 012, AC-9), in seconds of Space time. */
+const TURN_SECONDS = 0.6;
 const CANVAS_ATTRIBUTES = ['tabindex', 'role', 'aria-label'] as const;
 
 /**
@@ -44,9 +47,20 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
   const turntable = new Turntable(config.turntable.idleDelay, !reducedMotion);
   const ui = createControlsUi({ overlay, signal, coarsePointer, onReset: () => reset() });
 
+  /** A `turnTo()` in progress: directions and targets to ease between, at a fixed distance. */
+  let turn: {
+    from: Vector3;
+    to: Vector3;
+    fromTarget: Vector3;
+    distance: number;
+    elapsed: number;
+    duration: number;
+  } | null = null;
+
   let userMoved = false;
   const interact = () => {
     userMoved = true;
+    turn = null; // the visitor takes over
     turntable.interact();
     orbit.autoRotate = false;
     ui.dismissHint();
@@ -85,6 +99,57 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
     orbit.autoRotate = false;
     orbit.update();
     orbit.autoRotate = autoRotate;
+  }
+
+  /** Flushes leftover damping so a programmatic move doesn't pick up stale drag velocity. */
+  function settle() {
+    const damping = orbit.enableDamping;
+    const autoRotate = orbit.autoRotate;
+    orbit.enableDamping = false;
+    orbit.autoRotate = false; // without a delta, update() would add a 60 fps turntable step
+    orbit.update();
+    orbit.enableDamping = damping;
+    orbit.autoRotate = autoRotate;
+  }
+
+  /** Places the camera `distance` from `target` along `direction`, then lets OrbitControls apply its limits. */
+  function place(direction: Vector3, target: Vector3, distance: number) {
+    orbit.target.copy(target);
+    camera.position.copy(target).addScaledVector(direction, distance);
+    settle();
+  }
+
+  function turnTo(direction: readonly [number, number, number], { duration = TURN_SECONDS } = {}) {
+    settle();
+    const spherical = new Spherical().setFromVector3(new Vector3(...direction));
+    spherical.radius = 1;
+    spherical.phi = Math.min(orbit.maxPolarAngle, Math.max(orbit.minPolarAngle, spherical.phi));
+    const to = new Vector3().setFromSpherical(spherical);
+    const distance = Math.min(
+      orbit.maxDistance,
+      Math.max(orbit.minDistance, camera.position.distanceTo(orbit.target)),
+    );
+
+    userMoved = true;
+    turntable.interact();
+    orbit.autoRotate = false;
+    turn = null;
+    if (reducedMotion || duration <= 0) {
+      place(to, focus, distance);
+      return;
+    }
+    const from = camera.position.clone().sub(orbit.target).normalize();
+    turn = { from, to, fromTarget: orbit.target.clone(), distance, elapsed: 0, duration };
+  }
+
+  /** Advances a turn in progress by `delta` seconds; clears it at the end. */
+  function advanceTurn(delta: number) {
+    if (!turn) return;
+    turn.elapsed += delta;
+    const t = Math.min(1, turn.elapsed / turn.duration);
+    const target = new Vector3().lerpVectors(turn.fromTarget, focus, easeTurn(t));
+    place(turnStep(turn.from, turn.to, t), target, turn.distance);
+    if (t >= 1) turn = null;
   }
 
   const apply = (action: KeyAction) => {
@@ -129,7 +194,8 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
     update(delta) {
       if (disposed) return;
       turntable.tick(delta);
-      orbit.autoRotate = turntable.active;
+      advanceTurn(delta);
+      orbit.autoRotate = turntable.active && !turn;
       orbit.update(delta);
       ui.tick(delta);
     },
@@ -142,6 +208,11 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
       return userMoved;
     },
     setHome,
+    turnTo,
+    holdTurntable(hold) {
+      turntable.hold(hold);
+      if (hold) orbit.autoRotate = false;
+    },
     dispose() {
       if (disposed) return;
       disposed = true;

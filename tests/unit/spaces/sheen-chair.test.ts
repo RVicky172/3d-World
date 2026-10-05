@@ -1,5 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { NodeIO } from '@gltf-transform/core';
+import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+import { getBounds } from '@gltf-transform/functions';
 import { SHEEN_CHAIR } from '../../../src/spaces/sheen-chair/data';
 
 /** SPDX id → how the licence is written in CREDITS.md. Constitution IX: nothing else is allowed. */
@@ -90,5 +93,53 @@ describe('sheen-chair compressed model (spec 011)', () => {
   it('AC-15: its CREDITS row says it was converted', () => {
     const [asset = ''] = creditsRows().get(SHEEN_CHAIR.model.path) ?? [];
     expect(asset).toMatch(/converted: Meshopt \+ KTX2/);
+  });
+});
+
+/** The source model's bounds, in the same (glTF scene) coordinates the hotspot positions use. */
+async function sourceBounds(): Promise<{ min: number[]; max: number[] }> {
+  const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+  const document = await io.read('assets-src/sheen-chair/SheenChair.glb');
+  const [scene] = document.getRoot().listScenes();
+  return getBounds(scene!);
+}
+
+describe('sheen-chair hotspots (spec 012, AC-5, AC-13)', () => {
+  const hotspots = SHEEN_CHAIR.hotspots ?? [];
+
+  it('has the four approved hotspots, in order, with unique kebab-case ids (D-021)', () => {
+    expect(hotspots.map((h) => h.id)).toEqual(['seat', 'frame', 'legs', 'label']);
+    for (const { id } of hotspots) expect(id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+  });
+
+  it.each(hotspots.map((h) => [h.id, h] as const))(
+    '%s: a title of ≤ 4 words and a text of ≤ 2 sentences',
+    (_, h) => {
+      expect(h.title.trim()).not.toBe('');
+      expect(h.title.trim().split(/\s+/).length).toBeLessThanOrEqual(4);
+      expect(h.text.trim()).not.toBe('');
+      expect(h.text.match(/[.!?](\s|$)/g)?.length ?? 0).toBeLessThanOrEqual(2);
+    },
+  );
+
+  it('places every point within the model’s bounds (+2 %)', async () => {
+    const { min, max } = await sourceBounds();
+    for (const { id, position } of hotspots) {
+      position.forEach((c, axis) => {
+        const margin = 0.02 * (max[axis]! - min[axis]!);
+        expect(c, `${id} axis ${axis}`).toBeGreaterThanOrEqual(min[axis]! - margin);
+        expect(c, `${id} axis ${axis}`).toBeLessThanOrEqual(max[axis]! + margin);
+      });
+    }
+  });
+
+  it('gives every hotspot a viewing direction the controls can reach (polar limits, 0.15 rad from the poles)', () => {
+    for (const { id, view } of hotspots) {
+      const length = Math.hypot(...view);
+      expect(length, id).toBeGreaterThan(0);
+      const polar = Math.acos(view[1] / length);
+      expect(polar, id).toBeGreaterThanOrEqual(0.15);
+      expect(polar, id).toBeLessThanOrEqual(Math.PI - 0.15);
+    }
   });
 });

@@ -507,3 +507,217 @@ body[data-view='gallery'] .back-to-gallery {
     animation: none;
   }
 }
+
+/*
+ * Info panel (spec 012): the Space's title and description, first in the overlay (Tab order, AC-4).
+ * Wide screens: a side panel at top-right. Narrow: a bottom sheet above the controls row, ≤ 35 % of the
+ * viewport (AC-3). Only the toggle and the card take pointer events, so the rest of its box never blocks
+ * dragging the model.
+ */
+.info {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  width: min(20rem, 40vw);
+  max-height: calc(100% - 112px);
+  pointer-events: none;
+  /* Above hotspot markers (a point behind the sheet shouldn't sit on its text); below an open annotation. */
+  z-index: 1;
+}
+
+.info > * {
+  pointer-events: auto;
+}
+
+.info-toggle {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.info-toggle:hover {
+  border-color: var(--accent);
+}
+
+.info-toggle:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.info-panel {
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.info-panel h2 {
+  margin: 0 0 6px;
+  font-size: 1.05rem;
+}
+
+.info-panel p {
+  margin: 0;
+  color: var(--fg);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .info {
+    top: auto;
+    bottom: 72px;
+    left: 16px;
+    width: auto;
+    max-height: 35vh;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  /* The bottom sheet takes the hint's place, so the hint moves below the back link. */
+  .controls-hint {
+    top: 64px;
+    bottom: auto;
+  }
+
+  /*
+   * Squeezed beside the controls bar, the model credit wrapped to four lines and rose over the sheet. Give it
+   * its own full-width line above the controls row, and lift the sheet above it.
+   */
+  .model-credit {
+    right: 16px;
+    bottom: 72px;
+    max-width: none;
+  }
+
+  .overlay:has(.model-credit) .info {
+    bottom: 128px;
+  }
+}
+
+/*
+ * Hotspots (spec 012): markers placed by `transform` each frame, over everything but the controls bar. The
+ * layer lets drags through to the 3D view between markers; markers and the annotation catch their own
+ * (AC-11). Each marker is a 44 px hit area around a smaller dot. Dimmed markers can't be used, so drags pass
+ * through them too (AC-7).
+ */
+.hotspots {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.hotspot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  will-change: transform;
+}
+
+.hotspot[hidden] {
+  display: none;
+}
+
+.hotspot-dot {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--fg);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
+.hotspot:hover .hotspot-dot,
+.hotspot[aria-expanded='true'] .hotspot-dot {
+  width: 22px;
+  height: 22px;
+}
+
+.hotspot:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+}
+
+/* Normally under the info panel; a focused or open marker comes above it, so focus is never hidden (WCAG 2.4.11). */
+.hotspot:focus-visible,
+.hotspot[aria-expanded='true'] {
+  z-index: 2;
+}
+
+.hotspot.is-dimmed {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+.hotspot-annotation {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  width: min(16rem, calc(100vw - 32px));
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--fg);
+  pointer-events: auto;
+}
+
+.hotspot-annotation h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.hotspot-annotation p {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.hotspot-annotation button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-inset);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.hotspot-annotation button:hover {
+  border-color: var(--accent);
+}
+
+.hotspot-annotation button:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}

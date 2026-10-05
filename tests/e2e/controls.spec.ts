@@ -216,12 +216,16 @@ test.describe('with reduced motion (input-driven only)', () => {
       }
     });
 
-    test('Tab order follows the layout: back link → 3D view → "?" → "Reset view"', async ({ page }) => {
+    test('Tab order follows the layout: back link → 3D view → info toggle → "?" → "Reset view"', async ({
+      page,
+    }) => {
       await gotoCube(page);
       await page.keyboard.press('Tab');
       await expect(backLink(page)).toBeFocused();
       await page.keyboard.press('Tab');
       await expect(canvas(page)).toBeFocused();
+      await page.keyboard.press('Tab'); // spec 012: the info panel's toggle comes right after the 3D view
+      await expect(page.locator('button.info-toggle')).toBeFocused();
       await page.keyboard.press('Tab');
       await expect(helpButton(page)).toBeFocused();
       await page.keyboard.press('Tab');

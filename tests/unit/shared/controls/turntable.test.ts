@@ -54,3 +54,25 @@ describe('Turntable (AC-11)', () => {
     expect(run()).toEqual(run());
   });
 });
+
+describe('Turntable hold (spec 012, AC-12)', () => {
+  it('stays still while held, however long the visitor is idle', () => {
+    const t = new Turntable(4, true);
+    t.hold(true);
+    expect(t.active).toBe(false);
+    t.tick(100);
+    expect(t.active).toBe(false);
+  });
+
+  it('release restarts the idle delay rather than resuming at once', () => {
+    const t = new Turntable(4, true);
+    t.hold(true);
+    t.tick(100);
+    t.hold(false);
+    expect(t.active).toBe(false);
+    t.tick(3.9);
+    expect(t.active).toBe(false);
+    t.tick(0.1);
+    expect(t.active).toBe(true);
+  });
+});

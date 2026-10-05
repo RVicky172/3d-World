@@ -15,6 +15,8 @@ import { createModelViewer, type ModelViewerDeps } from '../../../../src/shared/
 import type { ModelLoader } from '../../../../src/shared/model-viewer/loader';
 import { frameDistance } from '../../../../src/shared/model-viewer/framing';
 import type { ModelViewerConfig } from '../../../../src/shared/model-viewer/types';
+import { toScreen } from '../../../../src/shared/hotspots/projection';
+import type { HotspotConfig } from '../../../../src/shared/hotspots/types';
 import { createFakeContext } from '../../../helpers/fakes';
 
 const CONFIG: ModelViewerConfig = {
@@ -183,6 +185,72 @@ describe('createModelViewer (spec 010)', () => {
       press('r');
       expect(distance()).toBeCloseTo(frameDistance(RADIUS, FOV, 0.5, 0.75), 6);
       expect(direction().toArray()).toEqual([0, 0, 1].map((v) => expect.closeTo(v, 6)));
+    });
+  });
+
+  describe('hotspots (spec 012)', () => {
+    // The box is 2 × 4 × 4 centred at (5, −3, 1) in the model's own coordinates: its front face is at z = 3.
+    const FRONT: HotspotConfig = {
+      id: 'front',
+      title: 'Front',
+      text: 'The front face.',
+      position: [5, -3, 3],
+      view: [1, 0, 1],
+    };
+    const WITH_HOTSPOTS: ModelViewerConfig = { ...CONFIG, hotspots: [FRONT] };
+    const layer = () => ctx.overlay.querySelector('.hotspots');
+    const marker = () => ctx.overlay.querySelector<HTMLButtonElement>('button.hotspot')!;
+    const translation = () => {
+      const match = /translate\((-?[\d.]+)px, (-?[\d.]+)px\)/.exec(marker().style.transform);
+      return match ? { x: Number(match[1]), y: Number(match[2]) } : null;
+    };
+
+    it('adds the markers before the controls bar, so they come first in Tab order (AC-10, plan)', async () => {
+      await open(WITH_HOTSPOTS);
+      const bar = ctx.overlay.querySelector('.controls-bar')!;
+      expect(layer()).not.toBeNull();
+      expect(layer()!.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(marker().getAttribute('aria-label')).toBe('Hotspot: Front');
+    });
+
+    it('reports world positions that include the model’s centring (AC-6 seam)', async () => {
+      await open(WITH_HOTSPOTS);
+      const [front] = viewer.hotspotPositions!();
+      expect(front?.id).toBe('front');
+      front?.world.forEach((c, i) => expect(c).toBeCloseTo([0, 0, 2][i]!, 9));
+    });
+
+    it('places markers from the camera as the controls left it this frame (AC-6)', async () => {
+      await open(WITH_HOTSPOTS);
+      viewer.resize(800, 600);
+      viewer.update(1 / 60, 0);
+      // The turntable turns the camera inside controls.update(): 0.5 s of it moves the point visibly.
+      viewer.update(0.5, 0.5);
+      camera().updateMatrixWorld();
+      const expected = toScreen(new Vector3(0, 0, 2), camera(), 800, 600);
+      expect(translation()?.x).toBeCloseTo(expected.x, 0);
+      expect(translation()?.y).toBeCloseTo(expected.y, 0);
+    });
+
+    it('activating a marker turns the camera to its view (AC-9)', async () => {
+      await open(WITH_HOTSPOTS);
+      viewer.resize(800, 600);
+      viewer.update(1 / 60, 0);
+      marker().click();
+      for (let i = 1; i <= 60; i++) viewer.update(1 / 60, i / 60);
+      expect(direction().angleTo(new Vector3(1, 0, 1).normalize())).toBeLessThan(0.01);
+    });
+
+    it('dispose() removes the markers (AC-15)', async () => {
+      await open(WITH_HOTSPOTS);
+      viewer.dispose();
+      expect(layer()).toBeNull();
+    });
+
+    it('a model without hotspots gets no layer and no positions (AC-14)', async () => {
+      await open();
+      expect(layer()).toBeNull();
+      expect(viewer.hotspotPositions?.() ?? []).toEqual([]);
     });
   });
 

@@ -1,3 +1,5 @@
+import type { HotspotConfig } from '../hotspots/types';
+
 type Vec3 = readonly [number, number, number];
 
 /** Licences Constitution IX allows. */
@@ -27,4 +29,6 @@ export interface ModelViewerConfig {
   turntable: { speed: number; idleDelay: number };
   /** Every file the Space loads (AC-13). */
   assets: readonly AssetCredit[];
+  /** Marked points with annotations, in Tab order (spec 012, AC-5). */
+  hotspots?: readonly HotspotConfig[];
 }

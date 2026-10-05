@@ -11,6 +11,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { prefersCoarsePointer } from '../../core/capabilities';
 import type { SpaceContext, SpaceInstance } from '../../core/types';
 import { createCameraControls } from '../controls';
+import { createHotspots } from '../hotspots';
 import { disposeObject3D } from '../dispose';
 import { showCredit } from './credit';
 import { distanceLimits, fitModel, frameDistance } from './framing';
@@ -18,6 +19,7 @@ import { createGltfLoader, type ModelLoader } from './loader';
 import type { ModelViewerConfig } from './types';
 
 export type { AssetCredit, ModelViewerConfig } from './types';
+export type { HotspotConfig } from '../hotspots';
 
 const DEFAULT_FILL = 0.75;
 /** Keep the camera off the poles so the view never flips (as in 004). */
@@ -98,6 +100,23 @@ export async function createModelViewer(
   });
 
   const initial = homeFor(1, homeDirection); // the Engine resizes us to the real aspect straight away
+  // Markers go in before the controls so they come first in Tab order (spec 012, AC-4). They act on the
+  // controls only when activated, which is after both exist.
+  const hotspots = config.hotspots?.length
+    ? createHotspots({
+        overlay: ctx.overlay,
+        canvas: ctx.canvas,
+        signal: ctx.signal,
+        camera,
+        model,
+        hotspots: config.hotspots,
+        epsilon: 0.01 * radius,
+        controls: {
+          turnTo: (direction, options) => controls.turnTo(direction, options),
+          holdTurntable: (hold) => controls.holdTurntable(hold),
+        },
+      })
+    : null;
   const controls = createCameraControls({
     camera,
     canvas: ctx.canvas,
@@ -122,8 +141,10 @@ export async function createModelViewer(
     camera,
     update(delta) {
       controls.update(delta);
+      hotspots?.update(delta); // after the controls, so markers match this frame's camera (AC-6)
     },
     focusTarget: () => ctx.canvas, // the 3D view (spec 004, AC-13)
+    hotspotPositions: () => hotspots?.positions() ?? [],
     resize(width, height) {
       const aspect = width / height;
       camera.aspect = aspect;
@@ -134,8 +155,10 @@ export async function createModelViewer(
         ? homeDirection
         : camera.position.clone().sub(controls.target).normalize();
       controls.setHome(homeFor(aspect, direction));
+      hotspots?.resize(width, height);
     },
     dispose() {
+      hotspots?.dispose();
       controls.dispose();
       removeCredit();
       disposeObject3D(scene);

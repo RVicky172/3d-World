@@ -109,5 +109,25 @@ describe('installDebugHook', () => {
       camera.position.set(9, 9, 9);
       expect(pose?.position).toEqual([1, 2, 3]); // a snapshot, not a live reference
     });
+
+    it('hotspots() reports the active Space’s hotspot world positions, else an empty list (spec 012, AC-6)', () => {
+      expect(target.__WORLD__?.hotspots()).toEqual([]);
+      deps.engine.instance = instanceWith(new PerspectiveCamera()); // no hotspots
+      expect(target.__WORLD__?.hotspots()).toEqual([]);
+
+      deps.engine.instance = {
+        ...instanceWith(new PerspectiveCamera()),
+        hotspotPositions: () => [{ id: 'seat', world: [1, 2, 3] }],
+      };
+      expect(target.__WORLD__?.hotspots()).toEqual([{ id: 'seat', world: [1, 2, 3] }]);
+    });
+
+    it('cameraProjection() reports the perspective camera’s fov, aspect, near and far, else null (spec 012)', () => {
+      expect(target.__WORLD__?.cameraProjection()).toBeNull();
+      deps.engine.instance = instanceWith(new PerspectiveCamera(40, 1.5, 0.01, 300));
+      expect(target.__WORLD__?.cameraProjection()).toEqual({ fov: 40, aspect: 1.5, near: 0.01, far: 300 });
+      deps.engine.instance = instanceWith(new OrthographicCamera());
+      expect(target.__WORLD__?.cameraProjection()).toBeNull();
+    });
   });
 });

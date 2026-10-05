@@ -296,6 +296,79 @@ describe('createCameraControls', () => {
     });
   });
 
+  describe('turnTo() and holdTurntable() (spec 012, AC-9, AC-12)', () => {
+    const direction = () => camera.position.clone().sub(controls.target).normalize();
+
+    it('eases round to look from the given direction, keeping the distance, over the duration', () => {
+      create();
+      const before = distance();
+      controls.turnTo([1, 0, 0], { duration: 0.5 });
+      frames(15); // 0.25 s: halfway in time
+      expect(direction().angleTo(new Vector3(1, 0, 0))).toBeCloseTo(Math.PI / 4, 1);
+      frames(15);
+      expectAt(direction(), [1, 0, 0]);
+      expect(distance()).toBeCloseTo(before, 6);
+      frames(30); // the turn is over: nothing drifts afterwards
+      expectAt(direction(), [1, 0, 0]);
+    });
+
+    it('is instant with reduced motion', () => {
+      create(true);
+      controls.turnTo([0, 0.6, 0.8]);
+      expectAt(direction(), [0, 0.6, 0.8]);
+    });
+
+    it('turns about the focus point, bringing a panned view back to it', () => {
+      create(true);
+      press('ArrowRight', { shiftKey: true });
+      expect(controls.target.length()).toBeGreaterThan(0.01);
+      controls.turnTo([1, 0, 0]);
+      expectAt(controls.target, [0, 0, 0]);
+      expectAt(direction(), [1, 0, 0]);
+    });
+
+    it('stays within the polar limits', () => {
+      create(true);
+      controls.turnTo([0, -1, 0.001]); // straight up from underneath
+      expect(polar()).toBeCloseTo(CONFIG.polar.max, 6);
+    });
+
+    it('any visitor input cancels a turn in progress', () => {
+      create();
+      controls.turnTo([1, 0, 0], { duration: 1 });
+      frames(10);
+      press('ArrowUp');
+      const after = direction();
+      frames(60);
+      expect(direction().angleTo(after)).toBeLessThan(1e-6);
+      expect(direction().angleTo(new Vector3(1, 0, 0))).toBeGreaterThan(0.1);
+    });
+
+    it('counts as moving the camera, and the turntable stays off while turning', () => {
+      create();
+      controls.turnTo([1, 0, 0], { duration: 0.5 });
+      expect(controls.userMoved).toBe(true);
+      frames(10);
+      expect(controls.turntableActive).toBe(false);
+    });
+
+    it('holdTurntable(true) keeps the turntable off; release resumes it only after the idle delay', () => {
+      create();
+      controls.holdTurntable(true);
+      frames(600); // 10 s, well past the 4 s idle delay
+      expect(controls.turntableActive).toBe(false);
+      const held = pose();
+      frames(30);
+      pose().forEach((value, i) => expect(value).toBeCloseTo(held[i] ?? NaN, 9));
+
+      controls.holdTurntable(false);
+      frames(60 * 3);
+      expect(controls.turntableActive).toBe(false);
+      frames(60 * 1.1);
+      expect(controls.turntableActive).toBe(true);
+    });
+  });
+
   describe('teardown (AC-8)', () => {
     it('dispose() removes attributes, UI and listeners, and restores touch scrolling', () => {
       create(false);
