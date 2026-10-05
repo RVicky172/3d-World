@@ -10,7 +10,18 @@
     <title>3D World</title>
   </head>
   <body>
-    <div id="app" aria-label="3D viewport"></div>
+    <div id="app" aria-label="3D viewport">
+      <!-- Spec 005, AC-5: without JavaScript nothing else ever renders here. -->
+      <noscript>
+        <div class="fallback" role="alert">
+          <h1>JavaScript is turned off</h1>
+          <p>
+            3D World needs JavaScript and WebGL2 to show its 3D spaces. Turn JavaScript on and reload the
+            page.
+          </p>
+        </div>
+      </noscript>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

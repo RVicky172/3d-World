@@ -20,6 +20,14 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - Poses round-trip through `Spherical`, so expect `2e-16`-style noise. Compare with `toBeCloseTo`, not `toEqual`.
 - It sets `touch-action: none` on its element and restores `''` in `dispose()`.
 
+## WebGL context loss
+
+- Headless Chromium (SwiftShader) does fire `webglcontextlost` and `webglcontextrestored` for `WEBGL_lose_context`, so restore can be tested E2E (005 T001 spike, 2026-10-05).
+- `restoreContext()` must be called in a **later task** than the lost event's dispatch. If it runs in a microtask right after the event (for example `await`ing a promise that the listener resolves), Chrome logs `INVALID_OPERATION: restoreContext: context restoration not allowed`. Chrome only marks restore as allowed after every listener has run and it has checked `defaultPrevented`. Wait for a `setTimeout`, or for an app signal.
+- `gl.getExtension()` returns **null while the context is lost**, so fetching `WEBGL_lose_context` on demand can lose the context but never restore it. Use three's `renderer.forceContextLoss()` / `forceContextRestore()`, which cache the extension from creation (this is what `__WORLD__.loseContext/restoreContext` do).
+- After a restore, a warm-up visit to a PBR Space is needed again before taking a memory baseline. three creates new `info` counters and a new DFG LUT on the new context.
+- three r186 calls `preventDefault()` on loss itself, and logs `Context Lost.` / `Context Restored.` with `console.log` (not as errors). With no app handling at all, demo-cube re-rendered after restore with no warnings. We still rebuild the view (005 plan), so the outcome doesn't depend on every resource re-uploading itself.
+
 ## Three.js — renderer sizing
 
 - Call `renderer.setSize(w, h, false)` when a `ResizeObserver` watches the container: with the default `updateStyle=true` Three writes inline px sizes onto the canvas, which then fights the CSS `100%` sizing. Let CSS size the canvas; set only the drawing buffer.
@@ -32,6 +40,8 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - **Camera assertions:** compare poses with `rotationBetween()` (degrees) and `distanceBetween()` plus tolerances, never exact equality. Motion tests: the turntable turns ~2° per 300 ms, and "stopped" is < 0.5°. Stable over 5 repeats in SwiftShader.
 - "Non-blank canvas" = `canvasCoverage(page)` (fraction of pixels differing from the corner/background pixel), not a distinct-colour count — colour counts depend on the model's rotation at capture time and flaked (9 vs >10). Its blank-canvas guard lives in the 001 not-found E2E test.
 - Negative E2E checks ("did not re-open") need a detector proven to fire: `watchForReopen` has its own positive test in `router.spec.ts`.
+- Playwright's text engine (`getByText`, `toHaveText` matching via text) **ignores `<noscript>` content**, even with `javaScriptEnabled: false`. Role and CSS locators still find it, e.g. `getByRole('heading')` or `locator('.fallback p')`.
+- `reuseExistingServer` is true locally, so a leftover `vite preview` on port 4173 silently serves a **stale build** to every E2E run, and a sabotage check then "passes". Never start your own preview on 4173/4174. If you did, stop it before trusting E2E results.
 - Playwright `webServer` can be an array; per-server `env` is merged with `process.env` (no `cross-env` needed). The `subpath` project serves `/3d-World/`; its tests must use relative URLs (`goto("#/space/x")`, `goto("./")`) because a leading `/` drops the base path.
 - E2E: import `test`/`expect` from `tests/e2e/fixtures.ts`, not `@playwright/test` — the fixture fails any test with console errors. `gotoSpace()` and `distinctCanvasColours()` live there too.
 - Use Playwright's `test.use({ reducedMotion: "reduce" })` to make Space switches instant (fast loops) or to test the reduced-motion path.
@@ -66,6 +76,7 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - Piping a Node script via `node - <<EOF` runs it through Node 24's TypeScript stripping, and regex escapes like `/` inside template literals got mangled, so string matches silently missed. For edits containing regexes or backticks, use the Edit tool.
 - A temporary "bridge" to keep tests green between tasks only works if the code under it keeps its old semantics. Check which E2E tests depend on the changed behaviour before promising a task boundary.
 - Don't pipe `npm run check` through `grep` and then chain more steps with `&&`: the pipeline's exit status is grep's, so a failing typecheck slips through (it ticked tasks once). Check `$?` of `npm run check` itself before ticking.
+- Python `open(p, 'w')` on Windows writes **CRLF** endings. `npm run check` doesn't catch it (no Prettier step), but `prettier --check` flags every touched file. Write with `open(p, 'w', newline='\n')`, or use the Edit tool. `grep -c $'\r'` under Git Bash reported 0 even though the files had CRLF, so check with `file <path>` or `prettier --check` instead (005, 2026-10-05).
 - Shell-escaped JS one-liners (`node -e "..."`) eat backticks inside the script. Use the Edit tool or a heredoc file for code comments containing backticks.
 - To strip dev/test-only code from production, guard the **call site** with a literal `if (import.meta.env.MODE !== "production")`. Vite inlines MODE, the branch becomes dead code, and the imported module is tree-shaken. Passing MODE as a runtime argument alone would keep the module in the bundle. Verified: `__WORLD__` absent from `npm run build`, present in `npm run build:test`.
 - `vite build --mode test` is still a minified production-style build (`import.meta.env.PROD` is true); only `MODE` differs.

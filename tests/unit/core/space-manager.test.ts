@@ -93,7 +93,7 @@ describe('SpaceManager', () => {
       engine,
       fader,
       registry: [a.meta, b.meta, c.meta],
-      reducedMotion: false,
+      reducedMotion: () => false,
       statusElement: status,
     });
   });
@@ -118,6 +118,24 @@ describe('SpaceManager', () => {
     expect(ctx?.canvas).toBe(engine.renderer.domElement);
     expect(ctx?.overlay).toBe(engine.overlay);
     expect(ctx?.reducedMotion).toBe(false);
+  });
+
+  it('reads the reduced-motion preference for each view it opens (spec 005, AC-10)', async () => {
+    let reduce = false;
+    const live = new SpaceManager({
+      engine,
+      fader,
+      registry: [a.meta, b.meta],
+      reducedMotion: () => reduce,
+      statusElement: status,
+    });
+
+    await live.open('a');
+    reduce = true;
+    await live.open('b');
+
+    expect(a.instances[0]?.ctx.reducedMotion).toBe(false); // the open view keeps what it was given
+    expect(b.instances[0]?.ctx.reducedMotion).toBe(true);
   });
 
   it('disposes the previous Space before creating and showing the next (AC-3, AC-10)', async () => {
@@ -260,6 +278,98 @@ describe('SpaceManager', () => {
 
     await expect(openA).resolves.toBe('superseded');
     expect(engine.instance).toBeNull();
+  });
+
+  describe('suspend() and resume() (spec 005, context loss)', () => {
+    it('suspend() disposes the Space and clears the ready signals, but keeps data-view (AC-6, AC-8)', async () => {
+      await manager.open('a');
+      log = [];
+
+      manager.suspend();
+
+      expect(log).toEqual(['dispose(a)', 'setInstance(null)']);
+      expect(a.instances[0]?.signalAbortedAtDispose).toBe(true);
+      expect(engine.instance).toBeNull();
+      expect(manager.activeId).toBeNull();
+      expect(status.dataset.spaceReady).toBeUndefined();
+      expect(status.dataset.spaceStatus).toBeUndefined();
+      expect(status.dataset.spaceId).toBeUndefined();
+      expect(status.dataset.view).toBe('space');
+    });
+
+    it('resume() reopens the same Space from scratch (AC-7)', async () => {
+      await manager.open('a');
+      manager.suspend();
+
+      await expect(manager.resume()).resolves.toBe('opened');
+
+      expect(a.instances).toHaveLength(2);
+      expect(engine.instance).toBe(a.instances[1]);
+      expect(status.dataset.spaceId).toBe('a');
+      expect(status.dataset.spaceReady).toBe('true');
+    });
+
+    it('resume() reopens a non-registry view such as the gallery through its factory', async () => {
+      const gallery = createSpace('gallery');
+      const factory = (await gallery.meta.load()).default;
+      await manager.openView('gallery', factory);
+      manager.suspend();
+
+      await expect(manager.resume()).resolves.toBe('opened');
+
+      expect(gallery.instances).toHaveLength(2);
+      expect(manager.activeView).toBe('gallery');
+      expect(engine.instance).toBe(gallery.instances[1]);
+    });
+
+    it('a suspend during an open cancels it; resume() opens the Space that was requested', async () => {
+      await manager.open('a');
+      const loadB = deferred<{ default: SpaceFactory }>();
+      const realB = await b.meta.load();
+      b.load.mockReturnValueOnce(loadB.promise);
+
+      const openB = manager.open('b');
+      await flush();
+      manager.suspend();
+      loadB.resolve(realB);
+
+      await expect(openB).resolves.toBe('superseded');
+      expect(b.instances).toHaveLength(0);
+      await expect(manager.resume()).resolves.toBe('opened');
+      expect(manager.activeId).toBe('b');
+    });
+
+    it('resume() after a suspend on "Space not found" shows it again', async () => {
+      await manager.open('nope');
+      manager.suspend();
+      expect(engine.overlay.querySelector('[role="alert"]')).toBeNull();
+
+      await expect(manager.resume()).resolves.toBe('not-found');
+      expect(engine.overlay.querySelector('[role="alert"]')?.textContent).toContain('Space not found');
+    });
+
+    it('resume() does nothing when nothing was requested, or after close()', async () => {
+      await expect(manager.resume()).resolves.toBeNull();
+      await manager.open('a');
+      await manager.close();
+      manager.suspend();
+      await expect(manager.resume()).resolves.toBeNull();
+      expect(a.instances).toHaveLength(1);
+    });
+
+    it('a newer open() after suspend wins, and resume() follows it', async () => {
+      await manager.open('a');
+      manager.suspend();
+      await manager.open('c');
+      manager.suspend();
+
+      await manager.resume();
+      expect(manager.activeId).toBe('c');
+    });
+
+    it('suspend() with nothing mounted does not throw', () => {
+      expect(() => manager.suspend()).not.toThrow();
+    });
   });
 
   describe('status attributes for tests and styling', () => {
@@ -436,7 +546,7 @@ describe('SpaceManager focus management (spec 004, AC-13)', () => {
     const manager = new SpaceManager({
       engine,
       fader: instantFader,
-      reducedMotion: true,
+      reducedMotion: () => true,
       registry,
       statusElement: document.createElement('div'),
     });

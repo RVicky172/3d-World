@@ -88,6 +88,52 @@ body {
   color: var(--muted);
 }
 
+/* WebGL context lost (spec 005): above the fader (z 2) so it shows whatever state a swap was in; below the back link. */
+.context-lost {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(32rem, calc(100% - 32px));
+  padding: 24px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+
+.context-lost h2 {
+  margin: 0 0 8px;
+  font-size: 1.25rem;
+}
+
+.context-lost p {
+  margin: 0 0 16px;
+  color: var(--muted);
+}
+
+.context-lost button {
+  min-height: 44px;
+  padding: 8px 20px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-inset);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.context-lost button:hover {
+  border-color: var(--accent);
+}
+
+.context-lost button:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .fallback {
   display: grid;
   place-content: center;
@@ -95,6 +141,7 @@ body {
   padding: 16px;
   text-align: center;
   gap: 8px;
+  overflow-wrap: anywhere;
 }
 
 .fallback p {

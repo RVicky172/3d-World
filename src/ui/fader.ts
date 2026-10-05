@@ -1,8 +1,11 @@
 export const FADE_DURATION_MS = 300;
 
 export interface FaderOptions {
-  /** With reduced motion the swap is instant (Constitution V, AC-10). */
-  reducedMotion: boolean;
+  /**
+   * With reduced motion the swap is instant (Constitution V, AC-10). Read on every fade, so a
+   * preference change mid-session applies to the next swap (spec 005, AC-10).
+   */
+  reducedMotion: () => boolean;
   durationMs?: number;
   /** Start opaque (e.g. at boot, so the first Space only fades in). */
   covered?: boolean;
@@ -17,7 +20,7 @@ type FadeState = 'in' | 'out';
 export class Fader {
   readonly element: HTMLDivElement;
   private readonly durationMs: number;
-  private readonly reducedMotion: boolean;
+  private readonly reducedMotion: () => boolean;
   private state: FadeState;
   private pending: { timer: ReturnType<typeof setTimeout>; waiters: Array<() => void> } | undefined;
 
@@ -31,7 +34,7 @@ export class Fader {
     this.state = options.covered ? 'out' : 'in';
     this.element.dataset.state = this.state;
     this.element.style.opacity = options.covered ? '1' : '0';
-    this.element.style.transition = this.reducedMotion ? 'none' : `opacity ${this.durationMs}ms ease`;
+    this.applyTransition();
     container.append(this.element);
   }
 
@@ -48,6 +51,13 @@ export class Fader {
     this.element.remove();
   }
 
+  /** Sets the CSS transition for the current preference; returns true when swaps are instant. */
+  private applyTransition(): boolean {
+    const instant = this.reducedMotion();
+    this.element.style.transition = instant ? 'none' : `opacity ${this.durationMs}ms ease`;
+    return instant;
+  }
+
   private fadeTo(state: FadeState, opacity: string): Promise<void> {
     if (state === this.state) {
       // Already there, or already heading there: wait for that fade rather than starting another.
@@ -57,10 +67,11 @@ export class Fader {
 
     // A fade in the other direction interrupts the current one; its waiters are released immediately.
     this.settlePending();
+    const instant = this.applyTransition();
     this.state = state;
     this.element.dataset.state = state;
     this.element.style.opacity = opacity;
-    if (this.reducedMotion) return Promise.resolve();
+    if (instant) return Promise.resolve();
 
     // A timer rather than `transitionend`: it always fires, even when the opacity
     // did not change or the tab is in the background.

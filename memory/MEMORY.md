@@ -2,11 +2,15 @@
 
 > Read this first every session. Keep ≤ 40 lines. Rules: `specs/memory-management.md`.
 
-## Current State (2026-10-04)
+## Current State (2026-10-05)
 
-- **Phase:** 1 (Core Engine & Gallery Shell) — 001–004 done; only 005 (WebGL fallback / reduced-motion gaps) left in Phase 1.
-- **Active feature:** none. **004-camera-controls is Implemented** (2026-10-04): 13 ACs verified, 293 unit + 61 E2E, entry 134.2 KB gzipped. 001–004 are committed and pushed to github.com/RVicky172/3d-World (main). Known, deferred: on narrow portrait phones demo-cube nearly fills the width (fixed camera distance); auto-framing is planned for 010.
-- **Next step:** (next session) `/spec-new` for **005 — WebGL capability check + fallback, reduced motion**. Much already exists (WebGL2 fallback screen from 000; reduced motion in Fader, starfield, turntable and damping), so the spec should audit and cover only the gaps (e.g. context loss, a runtime motion toggle?). Phase 1 then ends.
+- **Phase:** 1 (Core Engine & Gallery Shell) is **complete** (001–005 ✔️). Phase 2 (Single-Object Showcase) is next.
+- **Active feature:** none. **005-resilience-reduced-motion is Implemented** (2026-10-05):
+  - 12 ACs verified; 327 unit + 73 E2E; entry 134.9 KB gzipped.
+  - Covers the boot fallback (no WebGL2 / renderer fails, `data-webgl`), `<noscript>`, `ContextGuard` (suspend on loss, rebuild on restore, Reload), and the live reduced-motion preference.
+  - 005 is **not committed yet**; 001–004 are committed and pushed (main).
+  - Known, deferred: on narrow portrait phones demo-cube nearly fills the width; auto-framing is planned for 010.
+- **Next step:** commit 005 (when asked), then `/spec-new` for **010 — Model viewer Space** (load a GLB, auto-frame, turntable, environment lighting). It needs a licensed GLB asset (Constitution IX) and must not create a second renderer.
 - **Blockers:** none
 
 ## Files

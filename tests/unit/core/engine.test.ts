@@ -46,6 +46,35 @@ describe('Engine', () => {
     });
   });
 
+  describe('stop() (spec 005, AC-8)', () => {
+    it('stops scheduling frames, so no work is done while stopped', () => {
+      engine.setInstance(createInstance());
+      engine.start();
+      expect(scheduler.pending.size).toBe(1);
+
+      engine.stop();
+      expect(scheduler.pending.size).toBe(0);
+    });
+
+    it('can start again afterwards', () => {
+      const instance = createInstance();
+      engine.setInstance(instance);
+      engine.start();
+      engine.stop();
+      engine.start();
+      scheduler.flush(16);
+      expect(instance.update).toHaveBeenCalledTimes(1);
+      expect(scheduler.pending.size).toBe(1);
+    });
+
+    it('is safe to call twice, or before start()', () => {
+      expect(() => {
+        engine.stop();
+        engine.stop();
+      }).not.toThrow();
+    });
+  });
+
   describe('setup', () => {
     it('mounts the canvas, then an overlay layer above it', () => {
       expect([...container.children]).toEqual([renderer.domElement, engine.overlay]);

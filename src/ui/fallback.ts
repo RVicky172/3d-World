@@ -1,6 +1,13 @@
-/** Replaces the container's content with a readable "WebGL unavailable" message. */
-export function renderWebGLFallback(container: HTMLElement): void {
+/**
+ * Replaces the container's content with a readable "WebGL unavailable" message and marks
+ * `statusElement` with `data-webgl="unavailable"` for tests (spec 005, AC-3).
+ */
+export function renderWebGLFallback(
+  container: HTMLElement,
+  statusElement: HTMLElement = document.body,
+): void {
   container.replaceChildren();
+  statusElement.dataset.webgl = 'unavailable';
   const box = document.createElement('div');
   box.className = 'fallback';
   box.setAttribute('role', 'alert');

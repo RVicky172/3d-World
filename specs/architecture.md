@@ -1,6 +1,6 @@
 # 3D World — Architecture
 
-**Last updated:** 2026-10-04 · Status: core framework (001), hash router (002), gallery (003) and camera controls (004) implemented
+**Last updated:** 2026-10-05 · Status: core framework (001), hash router (002), gallery (003), camera controls (004) and resilience + reduced motion (005) implemented
 
 ---
 
@@ -27,7 +27,7 @@
 
 ```text
 src/
-  main.ts                 # bootstrap: WebGL check → renderer → Engine → Fader → SpaceManager → gallery view + back link → HashRouter.start()
+  main.ts                 # bootstrap: WebGL check + renderer (or fallback) → startApp(): motion watcher → Engine → Fader → SpaceManager → gallery view + back link → ContextGuard → HashRouter.start()
   core/
     types.ts              # the Space contract + RendererLike + OpenResult
     clock.ts              # Clock, createClock(), FakeClock: timestamps → { delta, elapsed }
@@ -37,7 +37,8 @@ src/
     routes.ts             # pure: parseHash() / formatRoute() — the route grammar
     router.ts             # HashRouter: hash → Space, redirects, page title, navigate()
     debug.ts              # window.__WORLD__ test/dev hook (stripped from production)
-    capabilities.ts       # hasWebGL2(), prefersReducedMotion(), prefersCoarsePointer()
+    capabilities.ts       # hasWebGL2(), createRendererOrNull(), watchReducedMotion(), prefersCoarsePointer()
+    context-guard.ts      # ContextGuard: WebGL context lost → suspend + message; restored → rebuild the view (005)
   shared/
     controls/
       index.ts            # createCameraControls(): OrbitControls + our keyboard + limits + turntable + UI
@@ -54,12 +55,13 @@ src/
     back-link.ts          # permanent "Back to gallery" link, first in the DOM (Tab order); hidden on the gallery
     fader.ts              # Fader: opacity overlay hiding Space swaps (instant with reduced motion)
     messages.ts           # "Space not found" / "Failed to load" alerts in the overlay
-    fallback.ts           # WebGL2-unavailable screen
+    fallback.ts           # WebGL2-unavailable screen (sets data-webgl="unavailable")
+    context-lost.ts       # "The 3D view stopped" alert with a Reload button (005)
   spaces/
     registry.ts           # spaces[] with lazy loaders, findSpace()
     <space-id>/
       index.ts            # default-exports a SpaceFactory; scene data as a typed config object
-  styles/main.css         # tokens; stacking: canvas → .overlay → .fader → .back-to-gallery
+  styles/main.css         # tokens; stacking: canvas → .overlay → .fader → .context-lost → .back-to-gallery
 scripts/
   bundle-checks.mjs       # pure bundle rules (unit-tested)
   check-bundle.mjs        # runs them on dist/ after `npm run build`
@@ -182,10 +184,11 @@ open(B) / openView('gallery', f)
 - **DOM order inside `#app`:** back link → canvas → overlay → fader. The back link is prepended so that Tab order
   matches the layout (back link → 3D view → view controls); z-index, not DOM order, decides what is drawn on top.
 - **Stacking inside `#app`:** canvas → `.overlay` (z 1, the view's DOM: gallery cards, Space UI, messages) →
-  `.fader` (z 2) → `.back-to-gallery` (z 4). The fader hides the whole view, both its 3D and its DOM, while
+  `.fader` (z 2) → `.context-lost` (z 3, 005) → `.back-to-gallery` (z 4). The fader hides the whole view, both its 3D and its DOM, while
   switching, so nothing half-removed is ever visible. Steady chrome sits above it.
 - It starts covered at boot, so the first Space only fades in.
-- With `prefers-reduced-motion`, swaps are instant.
+- With `prefers-reduced-motion`, swaps are instant. The preference is read on every fade, so a change made while the
+  page is open applies to the next swap (005).
 - Its promises resolve on a timer rather than on `transitionend`, which doesn't always fire.
 
 ## Routing (HashRouter)
@@ -298,6 +301,31 @@ label, config })` in its factory. It calls `controls.update(delta)` from `update
 - **Bundle note:** OrbitControls stays in the lazy chunk, but the three core classes it uses join the shared
   `three` module that the entry loads (+1.4 KB for 004, D-010).
 
+## Resilience & Reduced Motion (005)
+
+- **Boot:** `main.ts` creates the renderer only if `hasWebGL2()`, through `createRendererOrNull()`, because the
+  constructor can still throw. With no renderer, `renderWebGLFallback()` replaces `#app` and sets
+  `<body data-webgl="unavailable">`; nothing else starts. `index.html` has a `<noscript>` message.
+- **Context loss (`ContextGuard`):** "suspend on loss, rebuild on restore".
+  - **On `webglcontextlost`:** `engine.stop()` → `manager.suspend()`, which disposes the view while every GL call
+    is a harmless no-op. The "3D view stopped" panel appears and `data-webgl="lost"` is set.
+  - **On `webglcontextrestored`:** the panel and the signal are removed, then `engine.start()` →
+    `manager.resume()`, which rebuilds the last requested view from scratch through the normal open path.
+  - **Why rebuild:** three re-creates its internal caches on restore, so nothing from the old context is reused.
+    three itself calls `preventDefault()` on loss so the browser may restore.
+  - **If the context never comes back:** the panel's Reload button reloads the page.
+- **`SpaceManager.suspend()` / `resume()`:**
+  - `suspend()` works like `close()`, but remembers the latest requested target, even one still opening, and keeps
+    `data-view`.
+  - `resume()` re-runs that target; `close()` forgets it.
+- **Reduced motion:** `watchReducedMotion()` follows the media query's `change` event for the page's lifetime.
+  - The Fader reads it per fade and the SpaceManager per view (`SpaceContext.reducedMotion`). JS-driven motion
+    (turntable, damping, starfield) therefore follows from the next view opened.
+  - CSS `@media (prefers-reduced-motion)` rules follow immediately.
+  - There is no on-page toggle (D-011).
+- **Body signals:** `data-webgl` is absent when healthy, `unavailable` after a failed boot, and `lost` while the
+  context is gone.
+
 ## Disposal Rules
 
 A Space's `dispose()` must free everything it created: geometries, materials, textures, listeners, DOM elements and
@@ -313,23 +341,27 @@ composers.
 
 ## Testability Seams
 
-| Seam                   | Real                                          | In tests                                                                              |
-| ---------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Time                   | `createClock()`                               | `FakeClock`                                                                           |
-| Frames                 | `requestAnimationFrame`                       | `FakeScheduler.flush(now)`                                                            |
-| Visibility             | `document`                                    | `FakeVisibility.set('hidden')`                                                        |
-| Renderer (Engine)      | `WebGLRenderer`                               | `createFakeRenderer()` (`RendererLike`)                                               |
-| Resize                 | `ResizeObserver`                              | injected `watchResize` callback                                                       |
-| Space context          | built by `SpaceManager`                       | `createFakeContext()`                                                                 |
-| Engine/Fader (Manager) | `Engine`, `Fader`                             | `ManagedEngine`, `Transition` fakes                                                   |
-| URL + history (Router) | `window.location`, `window.history`, `window` | `FakeBrowserLocation` (all three in one)                                              |
-| Camera controls (unit) | OrbitControls on the real canvas              | real OrbitControls on a jsdom canvas; keyboard/wheel events; `FakeClock`-style deltas |
-| Touch input (E2E)      | fingers                                       | `touchGesture()`: CDP `Input.dispatchTouchEvent` (Chromium)                           |
-| Gallery (unit)         | `createGalleryView` in `main.ts`              | injected test registry; `createFakeContext()`                                         |
-| Sub-path hosting (E2E) | GitHub Pages `/3d-World/`                     | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174               |
-| Running app (E2E)      | —                                             | `window.__WORLD__` in `npm run build:test` builds                                     |
+| Seam                          | Real                                             | In tests                                                                              |
+| ----------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| Time                          | `createClock()`                                  | `FakeClock`                                                                           |
+| Frames                        | `requestAnimationFrame`                          | `FakeScheduler.flush(now)`                                                            |
+| Visibility                    | `document`                                       | `FakeVisibility.set('hidden')`                                                        |
+| Renderer (Engine)             | `WebGLRenderer`                                  | `createFakeRenderer()` (`RendererLike`)                                               |
+| Resize                        | `ResizeObserver`                                 | injected `watchResize` callback                                                       |
+| Space context                 | built by `SpaceManager`                          | `createFakeContext()`                                                                 |
+| Engine/Fader (Manager)        | `Engine`, `Fader`                                | `ManagedEngine`, `Transition` fakes                                                   |
+| URL + history (Router)        | `window.location`, `window.history`, `window`    | `FakeBrowserLocation` (all three in one)                                              |
+| Camera controls (unit)        | OrbitControls on the real canvas                 | real OrbitControls on a jsdom canvas; keyboard/wheel events; `FakeClock`-style deltas |
+| Touch input (E2E)             | fingers                                          | `touchGesture()`: CDP `Input.dispatchTouchEvent` (Chromium)                           |
+| Gallery (unit)                | `createGalleryView` in `main.ts`                 | injected test registry; `createFakeContext()`                                         |
+| Sub-path hosting (E2E)        | GitHub Pages `/3d-World/`                        | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174               |
+| Running app (E2E)             | —                                                | `window.__WORLD__` in `npm run build:test` builds                                     |
+| Context loss                  | GPU/driver reset on the renderer's canvas        | unit: `EventTarget` canvas + fake engine/manager; E2E: `__WORLD__.loseContext()`      |
+| Motion preference             | `matchMedia('(prefers-reduced-motion: reduce)')` | unit: fake `MediaQueryList` (`EventTarget` + `matches`); E2E: `page.emulateMedia()`   |
+| No WebGL2 / no renderer (E2E) | the browser                                      | init script patching `HTMLCanvasElement.prototype.getContext`                         |
 
-`window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory`, `cameraAspect` and `cameraPose`. It is installed behind a
+`window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory`, `cameraAspect`, `cameraPose`, and
+`loseContext` / `restoreContext` (three's `forceContextLoss/Restore`; restore only after `data-webgl="lost"`). It is installed behind a
 literal `import.meta.env.MODE !== 'production'` check, so production bundles drop it. `npm run build` verifies this.
 
 ## Multi-Object Pattern (Solar System, planned — features 020–023)

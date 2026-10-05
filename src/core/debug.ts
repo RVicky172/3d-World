@@ -14,6 +14,9 @@ export interface WorldDebugApi {
   cameraAspect(): number | null;
   /** Snapshot of the active camera (spec 004): position xyz and quaternion xyzw. */
   cameraPose(): { position: number[]; quaternion: number[] } | null;
+  /** Simulates a GPU context loss (spec 005). Call `restoreContext()` only after `data-webgl="lost"`. */
+  loseContext(): void;
+  restoreContext(): void;
 }
 
 export interface DebugDeps {
@@ -23,7 +26,12 @@ export interface DebugDeps {
     close(): Promise<void>;
   };
   engine: {
-    readonly renderer: { readonly info: RendererLike['info'] };
+    readonly renderer: {
+      readonly info: RendererLike['info'];
+      /** three's WEBGL_lose_context wrappers; they cache the extension, which `getExtension()` won't return while lost. */
+      forceContextLoss(): void;
+      forceContextRestore(): void;
+    };
     readonly instance: SpaceInstance | null;
   };
   router: { navigate(id: string): void };
@@ -60,6 +68,8 @@ export function installDebugHook(
       const camera = engine.instance?.camera;
       return camera ? { position: camera.position.toArray(), quaternion: camera.quaternion.toArray() } : null;
     },
+    loseContext: () => engine.renderer.forceContextLoss(),
+    restoreContext: () => engine.renderer.forceContextRestore(),
     cameraAspect: () => {
       const camera = engine.instance?.camera;
       return camera instanceof PerspectiveCamera ? camera.aspect : null;

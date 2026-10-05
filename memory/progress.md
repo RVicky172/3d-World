@@ -11,6 +11,75 @@ Newest first. One entry per working session.
 
 ---
 
+## 2026-10-05 — 005-resilience-reduced-motion ✔️ Implemented (Phase 1 complete)
+
+**Done:**
+
+- T090: `specs/architecture.md` gains a Resilience & Reduced Motion section, plus layout, stacking (z 3), seams and `__WORLD__` additions.
+- DoD:
+  - `npm run check` ✅ (327 unit);
+  - `npm run test:e2e` ✅ (73);
+  - `npm run build` ✅ (entry 134.9 KB gzipped, +0.7 KB; `__WORLD__` absent from production);
+  - a temporary test logged no console warnings across lose/restore and navigation.
+- All 12 ACs ticked; spec Implemented; roadmap 005 ✔️; Phase 1 exit criteria met.
+- Fixed CRLF endings that Python edits had introduced in 22 files (`prettier --write`; learning recorded).
+
+**Next:** commit 005; then `/spec-new` for 010 (model viewer Space).
+**Blockers:** none
+
+## 2026-10-05 — 005-resilience-reduced-motion (T040–T051)
+
+**Done:**
+
+- `Engine.stop()`.
+- `SpaceManager.suspend()` / `resume()`: remembers the latest requested target, keeps `data-view`, and `close()` forgets the target.
+- `showContextLost()` panel at z 3 with a Reload button.
+- `ContextGuard`: on loss, stop → suspend → panel → `data-webgl="lost"`; on restore, clear → start → resume. Wired in `main.ts`.
+- `__WORLD__.loseContext/restoreContext` use three's `forceContextLoss/Restore`; `getExtension()` returns null while lost, so the plan's approach could never restore (plan + learnings updated).
+- E2E:
+  - loss and restore on the gallery and on a Space;
+  - Reload;
+  - leak check after restore (10 round trips).
+
+  Sabotage (no `resume`) fails all 3 restore tests, and the new tests passed 5×.
+
+- 327 unit + 73 E2E green; entry 134.9 KB (+0.7 KB vs 004).
+
+**Next:** T090 (architecture doc), then T091–T092 / `/spec-verify 005`. Phase 1 then closes.
+**Blockers:** none
+
+## 2026-10-05 — 005-resilience-reduced-motion (T020–T030)
+
+**Done:**
+
+- `watchReducedMotion()` / `MotionPreference` (follows the media query's `change` event). It replaces `prefersReducedMotion()`, which was removed because nothing used it any more.
+- Fader and SpaceManager take `reducedMotion: () => boolean`, read per fade and per view opened. `main.ts` keeps one watcher for the page's lifetime.
+- E2E:
+  - AC-10: live change → CSS at once, fade and turntable from the next view, no reload.
+  - AC-9: single reduced-motion regression covering the card, starfield, fade, hint, turntable and damping.
+  - Both proven to fail under sabotage.
+- 302 unit + 69 E2E green.
+
+**Next:** T040–T051, context loss (`Engine.stop`, `suspend`/`resume`, panel, `ContextGuard`, debug hooks, E2E).
+**Blockers:** none
+
+## 2026-10-05 — 005-resilience-reduced-motion (spec → T016)
+
+**Done:**
+
+- Spec drafted. The open questions were resolved by delegation (D-011): auto-restore + Reload button, motion change applies from the next view, no toggle, plain fallback. Spec Approved; plan and tasks written (30 tasks).
+- T001 spike: SwiftShader fires context lost/restored (restore must come in a later task; see learnings).
+- T010–T016:
+  - `createRendererOrNull()`;
+  - `data-webgl="unavailable"` on the fallback;
+  - `main.ts` split into `startApp()`, falling back when there's no WebGL2 or the renderer fails;
+  - `<noscript>` message;
+  - `tests/e2e/resilience.spec.ts` (6 tests: 3 routes, renderer failure, a11y/contrast/320 px, no-JS). The renderer-failure test was proven to fail under sabotage.
+- 298 unit + 67 E2E green.
+
+**Next:** T020–T026, live reduced motion (`watchReducedMotion`, getter in Fader/SpaceManager).
+**Blockers:** none
+
 ## 2026-10-04 — 004-camera-controls ✔️ Implemented
 
 **Done:** Definition of Done verified:

@@ -3,7 +3,7 @@
 > Phased plan. Each phase is a set of feature specs. Update statuses as work moves.
 > Status legend: ⬜ Not started · 📝 Spec drafted · ✅ Spec approved · 🚧 In progress · ✔️ Done
 
-**Last updated:** 2026-10-04
+**Last updated:** 2026-10-05
 
 ---
 
@@ -21,15 +21,16 @@ _Goal: the project builds, tests run, and the spec workflow is in place._
 
 _Goal: one renderer that can load, switch, and dispose Spaces; a gallery to pick them._
 
-| #   | Feature                                                                          | Spec                           | Status |
-| --- | -------------------------------------------------------------------------------- | ------------------------------ | ------ |
-| 001 | Space framework: `Space` contract, `SpaceManager`, render loop, resize, disposal | `features/001-space-framework` | ✔️     |
-| 002 | Hash router & deep links (`#/`, `#/space/<id>`)                                  | `features/002-hash-router`     | ✔️     |
-| 003 | Gallery page: cards for each registered Space, lazy loading                      | `features/003-gallery`         | ✔️     |
-| 004 | Shared camera controls (orbit/zoom/pan; mouse, touch, keyboard)                  | `features/004-camera-controls` | ✔️     |
-| 005 | WebGL capability check + fallback screen, reduced-motion support                 | —                              | ⬜     |
+| #   | Feature                                                                          | Spec                                     | Status |
+| --- | -------------------------------------------------------------------------------- | ---------------------------------------- | ------ |
+| 001 | Space framework: `Space` contract, `SpaceManager`, render loop, resize, disposal | `features/001-space-framework`           | ✔️     |
+| 002 | Hash router & deep links (`#/`, `#/space/<id>`)                                  | `features/002-hash-router`               | ✔️     |
+| 003 | Gallery page: cards for each registered Space, lazy loading                      | `features/003-gallery`                   | ✔️     |
+| 004 | Shared camera controls (orbit/zoom/pan; mouse, touch, keyboard)                  | `features/004-camera-controls`           | ✔️     |
+| 005 | WebGL capability check + fallback screen, reduced-motion support                 | `features/005-resilience-reduced-motion` | ✔️     |
 
 **Exit criteria:** navigate gallery → placeholder Space → back, with no memory growth across 10 round-trips.
+✔️ **Phase 1 complete (2026-10-05):** met by the 003 AC-6 and 005 round-trip memory E2E tests.
 
 ## Phase 2 — Single-Object Showcase
 

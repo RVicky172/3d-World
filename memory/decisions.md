@@ -78,3 +78,10 @@ Format:
 **Decision:** (1) New 004 AC-13: when focus would otherwise be lost on a view switch (never on the first page view, and never from a still-visible focused element), focus moves to the new view's start. That is the 3D view for a Space, and on the gallery the card of the Space just left (or the heading). This clarifies 002's "focus is not stolen". (2) The 004 entry NFR is amended to ≤ 1.5 KB.
 **Alternatives:** Gallery heading instead of the card (loses the visitor's place); no focus management (keyboard users lose focus). Restructuring chunks to save size (no real saving, since startup loads `three` anyway).
 **Consequences:** `SpaceInstance` gains an optional `focusTarget()`. The size growth comes from `three` core classes being shared with lazy chunks: any Space importing new parts of three core can grow the entry, so watch the bundle-check line.
+
+## D-011 — Resilience and reduced-motion behaviour for 005 (2026-10-05)
+
+**Context:** Spec 005 open questions. The project lead delegated the choices and asked for simple ones, because this is a learning project.
+**Decision:** (1) After a WebGL context loss, show a message with a "Reload" button, and if the browser restores the context, reopen the current view automatically. (2) A change to `prefers-reduced-motion` applies from the next view opened (CSS rules update live). (3) There is no on-page motion toggle; the OS setting is the only source. (4) The WebGL fallback stays a plain message without a list of Spaces.
+**Alternatives:** Reload button only, or auto-recovery only; live reconfiguration of the open view's turntable, damping and starfield; a persisted on-page toggle; a text-only list of Spaces on the fallback.
+**Consequences:** No reactive motion state has to be threaded through Spaces or controls. Context restore reuses `SpaceManager`'s open path. AC-11 becomes a no-op constraint.

@@ -10,7 +10,11 @@ function createDeps() {
     close: vi.fn(async () => {}),
   };
   const engine = {
-    renderer: { info: { memory: { geometries: 3, textures: 1 } } },
+    renderer: {
+      info: { memory: { geometries: 3, textures: 1 } },
+      forceContextLoss: vi.fn<() => void>(),
+      forceContextRestore: vi.fn<() => void>(),
+    },
     instance: null as SpaceInstance | null,
   };
   const router = { navigate: vi.fn<(id: string) => void>() };
@@ -46,6 +50,13 @@ describe('installDebugHook', () => {
 
   describe('API', () => {
     beforeEach(() => installDebugHook(target, deps, 'test'));
+
+    it('loseContext() / restoreContext() simulate a GPU context loss through the renderer (spec 005)', () => {
+      target.__WORLD__?.loseContext();
+      expect(deps.engine.renderer.forceContextLoss).toHaveBeenCalledTimes(1);
+      target.__WORLD__?.restoreContext();
+      expect(deps.engine.renderer.forceContextRestore).toHaveBeenCalledTimes(1);
+    });
 
     it('open() and close() delegate to the SpaceManager', async () => {
       await expect(target.__WORLD__?.open('demo-cube')).resolves.toBe('opened');

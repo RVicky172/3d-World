@@ -26,7 +26,8 @@ export type ViewName = 'gallery' | 'space';
 export interface SpaceManagerOptions {
   engine: ManagedEngine;
   fader: Transition;
-  reducedMotion: boolean;
+  /** Read for each view opened, so a mid-session preference change applies to the next view (spec 005, AC-10). */
+  reducedMotion: () => boolean;
   registry?: readonly SpaceMeta[];
   /** Receives `data-view`, `data-space-ready`, `data-space-id`, `data-space-status`. Defaults to `<body>`. */
   statusElement?: HTMLElement;
@@ -44,6 +45,13 @@ interface Mounted {
 
 type FactorySource = () => Promise<SpaceFactory | 'not-found'>;
 
+/** The latest view requested, so `resume()` can rebuild it after a context loss (spec 005). */
+interface Target {
+  view: ViewName;
+  id: string | null;
+  source: FactorySource;
+}
+
 /**
  * Loads, shows, switches and disposes views — registry Spaces and the gallery. Never throws.
  *
@@ -54,10 +62,11 @@ type FactorySource = () => Promise<SpaceFactory | 'not-found'>;
 export class SpaceManager {
   private readonly engine: ManagedEngine;
   private readonly fader: Transition;
-  private readonly reducedMotion: boolean;
+  private readonly reducedMotion: () => boolean;
   private readonly registry: readonly SpaceMeta[];
   private readonly status: HTMLElement;
   private mounted: Mounted | null = null;
+  private target: Target | null = null;
   private sequence = 0;
   /** False until the first view mounts: focus is never moved on the initial page view (AC-13). */
   private hasMounted = false;
@@ -95,6 +104,7 @@ export class SpaceManager {
   /** Disposes the active view (if any) and cancels any open in flight. */
   async close(): Promise<void> {
     ++this.sequence;
+    this.target = null;
     this.clearStatus();
     delete this.status.dataset.view;
     clearMessage(this.engine.overlay);
@@ -102,8 +112,27 @@ export class SpaceManager {
     await this.fader.in();
   }
 
+  /**
+   * Disposes the active view and cancels any open in flight, remembering what should be showing
+   * (spec 005: called when the WebGL context is lost). Keeps `data-view` so chrome doesn't flash.
+   */
+  suspend(): void {
+    ++this.sequence;
+    this.clearStatus();
+    clearMessage(this.engine.overlay);
+    this.unmount();
+  }
+
+  /** Rebuilds the view that was last requested; null if there is none (nothing opened, or closed). */
+  async resume(): Promise<OpenResult | null> {
+    if (!this.target) return null;
+    const { view, id, source } = this.target;
+    return this.mount(view, id, source);
+  }
+
   private async mount(view: ViewName, id: string | null, source: FactorySource): Promise<OpenResult> {
     const token = ++this.sequence;
+    this.target = { view, id, source };
     const isStale = () => token !== this.sequence;
     const label = id ?? view;
     this.clearStatus();
@@ -135,7 +164,7 @@ export class SpaceManager {
         renderer: this.engine.renderer,
         canvas: this.engine.renderer.domElement,
         overlay: this.engine.overlay,
-        reducedMotion: this.reducedMotion,
+        reducedMotion: this.reducedMotion(),
         signal: controller.signal,
       });
     } catch (error) {

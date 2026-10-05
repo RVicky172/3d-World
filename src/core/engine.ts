@@ -76,6 +76,11 @@ export class Engine<R extends RendererLike = RendererLike> {
     this.loop.start();
   }
 
+  /** Stops rendering until `start()` (e.g. while the WebGL context is lost, spec 005 AC-8). */
+  stop(): void {
+    this.loop.stop();
+  }
+
   /** Sets (or clears, with `null`) the Space to render. Sizes it to the current viewport. */
   setInstance(instance: SpaceInstance | null): void {
     this.current = instance;
