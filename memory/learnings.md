@@ -10,6 +10,8 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 
 - three r186 lazily creates a shared **DFG LUT** texture (`getDFGLUT()`) the first time any physically based material (`MeshStandardMaterial`/`MeshPhysicalMaterial`) renders, and keeps it for the renderer's lifetime. `renderer.info.memory.textures` therefore goes +1 once and never back. GPU-leak tests must take their baseline **after a warm-up visit** to a PBR Space. A real leak still shows as growth per cycle (verified: disabling gallery dispose → 12 geometries vs 2).
 
+- **PMREM textures leak through `texture.dispose()`.** `PMREMGenerator.fromScene()` returns a render target. three r186 only frees render-target textures through `renderTarget.dispose()`: `texture.dispose()` returns early because `__webglInit` is never set for them, so `info.memory.textures` grows by 1 per visit. The model viewer disposes the target from the texture's `dispose` event. Unit tests with stub environments can't see this; the E2E memory round trip caught it (010 T073).
+
 ## Three.js — OrbitControls (r186)
 
 - Built-in keys are the opposite of our spec (plain arrows pan, Shift/Ctrl + arrows rotate) and have no zoom or reset, so we never call `listenToKeyEvents` and use `src/shared/controls/keyboard.ts` instead.
@@ -33,6 +35,19 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - Call `renderer.setSize(w, h, false)` when a `ResizeObserver` watches the container: with the default `updateStyle=true` Three writes inline px sizes onto the canvas, which then fights the CSS `100%` sizing. Let CSS size the canvas; set only the drawing buffer.
 - Never pass a 0 width/height to a Space's `resize()` — `camera.aspect` becomes NaN/Infinity. `Engine` skips it.
 
+## Assets & licences
+
+- **Read the model's `LICENSE.md`, not just its headline credit.** Khronos glTF-Sample-Assets lists every licence that applies. DamagedHelmet looks CC-BY but its files are **also CC-BY-NC** (the original author's licence), which Constitution IX forbids (D-014). In those files, the CC-BY-4.0 line under "This file and all other metadocumentation" covers only the docs, not the model.
+- Quick check without downloading: `curl -sIL <raw .glb url>` for `content-length`, and `curl -sfL <model>/LICENSE.md` for the licences.
+- three r186 `GLTFLoader` supports `KHR_materials_sheen` and `KHR_texture_transform`. `KHR_materials_variants` is not implemented but is optional, so the default materials are used. Check a GLB's `extensionsRequired` by reading its JSON chunk (bytes 20…20+len, len = uint32 at byte 12).
+
+## Model framing
+
+- A box-derived bounding sphere **over-estimates open shapes** (e.g. a chair: legs and back leave most of the sphere empty). At `fill` 0.75 the SheenChair outline filled only ~53 % of the smaller dimension, so its data sets `fill: 0.85`. Check new models with a screenshot at 1280×720 and 320×640 before trusting the default.
+- `canvasCoverage` (share of non-background pixels) is low for sparse silhouettes (~6 % for the chair) even when framing is right. Use bounds, not coverage, to judge framing.
+- The same over-estimate hits the **zoom-out limit**: at the 10 % sphere floor the chair outline is ~7 % (D-016). Any limit or framing rule stated in pixels needs a pixel check, not just the maths.
+- OrbitControls `update()` with no delta adds a 60 fps `autoRotate` step. `setHome()` switches auto-rotate off for its one update, so re-framing doesn't jump the turntable.
+
 ## Testing
 
 - **Multi-touch in E2E:** `touchGesture()` in `tests/e2e/fixtures.ts` sends CDP `Input.dispatchTouchEvent`. Chromium turns it into pointer events, which OrbitControls handles (one-finger orbit, pinch, two-finger pan). It needs a context with `hasTouch: true` (and `isMobile` for coarse-pointer wording).
@@ -50,6 +65,7 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - jsdom has no 2D canvas: `canvas.getContext("2d")` returns null and logs "Not implemented". For generated textures use `DataTexture` (bytes in a `Uint8Array`) — works in Node and on the GPU. `createFakeContext()` in `tests/helpers/fakes.ts` builds a `SpaceContext` for factory tests.
 - Shared fakes (`FakeScheduler`, `FakeVisibility`, `createFakeRenderer`) live in `tests/helpers/fakes.ts`.
 - A test factory that spreads `Partial<SpaceInstance>` overrides loses the `Mock` type on its methods; use `vi.mocked(instance.resize)` to get it back.
+- **E2E parallelism can take down the machine.** Playwright defaults to half the cores (12 here); 12 SwiftShader Chromiums, each multi-threaded, loading the 010 chair crashed Windows. `playwright.config.ts` caps workers (D-015); use `E2E_WORKERS=2` for a gentler run. Don't raise the cap or pass `--workers` > 4 locally.
 - Headless Chromium renders WebGL via SwiftShader (software). It's slow, so E2E scenes should allow a `?quality=low` mode; don't assert on FPS in CI.
 
 ## Routing
@@ -82,5 +98,6 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - `vite build --mode test` is still a minified production-style build (`import.meta.env.PROD` is true); only `MODE` differs.
 - `vi.spyOn(obj, "dispose")` fails to typecheck when `obj` is a generic `T extends { dispose(): void }`; type the helper parameter structurally as `{ dispose(): void }` instead.
 
+- **GLTFLoader + RoomEnvironment cost the entry +8.3 KB gzipped** (134.9 → 143.2 KB, measured 2026-10-05 for 010) even though they're only imported from a lazy Space. The three core classes they use (animation, skinning, interleaved buffers…) join the shared `three` chunk. The loader code itself (~12 KB gz) stays lazy.
 - Vite warns "chunks larger than 500 kB" for any Three.js bundle — that's the raw size; gzip is ~130 KB. The budget is measured gzipped (Constitution IV), so `chunkSizeWarningLimit` is set to 700.
 - Typecheck includes `vite.config.ts`/`playwright.config.ts`, so `@types/node` + `"node"` in tsconfig `types` is required.

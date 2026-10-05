@@ -4,13 +4,15 @@
 
 ## Current State (2026-10-05)
 
-- **Phase:** 1 (Core Engine & Gallery Shell) is **complete** (001–005 ✔️). Phase 2 (Single-Object Showcase) is next.
-- **Active feature:** none. **005-resilience-reduced-motion is Implemented** (2026-10-05):
-  - 12 ACs verified; 327 unit + 73 E2E; entry 134.9 KB gzipped.
-  - Covers the boot fallback (no WebGL2 / renderer fails, `data-webgl`), `<noscript>`, `ContextGuard` (suspend on loss, rebuild on restore, Reload), and the live reduced-motion preference.
-  - 005 is **not committed yet**; 001–004 are committed and pushed (main).
-  - Known, deferred: on narrow portrait phones demo-cube nearly fills the width; auto-framing is planned for 010.
-- **Next step:** commit 005 (when asked), then `/spec-new` for **010 — Model viewer Space** (load a GLB, auto-frame, turntable, environment lighting). It needs a licensed GLB asset (Constitution IX) and must not create a second renderer.
+- **Phase:** 2 (Single-Object Showcase) in progress: **010 ✔️**; 011 (asset pipeline) is next on the roadmap.
+- **Active feature:** none. Next: `/spec-new` for **011** (GLB compression with Draco/Meshopt, KTX2 textures, loading progress UI). Measure the entry again there: decoders/loaders may grow it (D-013 left ~105 KB headroom under 250 KB).
+- **Last done:** **010-model-viewer is Implemented** (2026-10-05), **not yet committed**:
+  - 14 ACs verified; 379 unit + 90 E2E; entry 144.8 KB gzipped (+9.9 KB, inside the ≤ 10 KB NFR, D-013).
+  - sheen-chair (CC0, D-014): 21.2 KB code + 3.93 MB GLB; shared viewer in `src/shared/model-viewer/`; loading indicator in `SpaceManager`.
+  - AC-5 clarified: the 10 % zoom-out floor is on the bounding sphere (D-016).
+  - Fixed a PMREM render-target texture leak (+1 GPU texture per visit) found by the AC-10 E2E.
+  - E2E workers capped at `min(4, cores/4)`, override `E2E_WORKERS` (D-015), after a full run crashed the machine.
+- **Next step:** commit 010 (`feat(010): model viewer Space`), then `/spec-new` 011.
 - **Blockers:** none
 
 ## Files

@@ -69,6 +69,67 @@ export function canvasCoverage(page: Page): Promise<number> {
   });
 }
 
+/** What `contentBounds` measures: drawing-buffer pixels, plus fill and brightness of the content. */
+export type ContentBounds = {
+  width: number;
+  height: number;
+  /** Larger side of the content's bounding box ÷ the canvas's smaller side; 0 when blank (spec 010, AC-2). */
+  fillOfSmaller: number;
+  /** Mean luminance (0–255) of the content pixels; 0 when blank (spec 010, AC-4). */
+  meanLuminance: number;
+};
+
+/**
+ * Bounding box of everything drawn that differs from the background (the corner pixel), measured on the
+ * canvas's drawing buffer. Unlike `canvasCoverage`, it judges framing well for sparse shapes such as a
+ * chair. Needs the test build's preserveDrawingBuffer.
+ */
+export function contentBounds(page: Page): Promise<ContentBounds> {
+  return page.evaluate(() => {
+    const source = document.querySelector<HTMLCanvasElement>('#app canvas');
+    if (!source) throw new Error('canvas not found');
+    const copy = document.createElement('canvas');
+    copy.width = source.width;
+    copy.height = source.height;
+    const ctx = copy.getContext('2d');
+    if (!ctx) throw new Error('2d context unavailable');
+    ctx.drawImage(source, 0, 0);
+    const { data, width, height } = ctx.getImageData(0, 0, copy.width, copy.height);
+    const [r0 = 0, g0 = 0, b0 = 0] = data;
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    let luminance = 0;
+    let count = 0;
+    // Every 2nd pixel in each direction: bounds within 2 px, fast enough in SwiftShader.
+    for (let y = 0; y < height; y += 2) {
+      for (let x = 0; x < width; x += 2) {
+        const i = (y * width + x) * 4;
+        const r = data[i] ?? 0;
+        const g = data[i + 1] ?? 0;
+        const b = data[i + 2] ?? 0;
+        if (Math.abs(r - r0) + Math.abs(g - g0) + Math.abs(b - b0) <= 12) continue;
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+        luminance += 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        count++;
+      }
+    }
+    if (count === 0) return { width: 0, height: 0, fillOfSmaller: 0, meanLuminance: 0 };
+    const boxWidth = maxX - minX + 1;
+    const boxHeight = maxY - minY + 1;
+    return {
+      width: boxWidth,
+      height: boxHeight,
+      fillOfSmaller: Math.max(boxWidth, boxHeight) / Math.min(width, height),
+      meanLuminance: luminance / count,
+    };
+  });
+}
+
 /** Camera pose from the test hook (spec 004). */
 export type CameraPose = { position: number[]; quaternion: number[] };
 

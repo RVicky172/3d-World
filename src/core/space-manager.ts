@@ -23,6 +23,15 @@ export interface Transition {
  */
 export type ViewName = 'gallery' | 'space';
 
+/** Shown while a view takes a while to load (spec 010, AC-8): the fader hides the view's own DOM meanwhile. */
+export interface LoadingIndicator {
+  show(label: string): void;
+  hide(): void;
+}
+
+/** Opens faster than this show no loading indication, so cached or tiny views don't flash it. */
+export const LOADING_DELAY_MS = 250;
+
 export interface SpaceManagerOptions {
   engine: ManagedEngine;
   fader: Transition;
@@ -31,6 +40,8 @@ export interface SpaceManagerOptions {
   registry?: readonly SpaceMeta[];
   /** Receives `data-view`, `data-space-ready`, `data-space-id`, `data-space-status`. Defaults to `<body>`. */
   statusElement?: HTMLElement;
+  loading?: LoadingIndicator;
+  loadingDelayMs?: number;
 }
 
 interface Mounted {
@@ -67,6 +78,10 @@ export class SpaceManager {
   private readonly status: HTMLElement;
   private mounted: Mounted | null = null;
   private target: Target | null = null;
+  private readonly loading: LoadingIndicator | null;
+  private readonly loadingDelayMs: number;
+  /** The request whose loading timer is pending or whose indicator is showing. */
+  private loadingFor: { token: number; timer: ReturnType<typeof setTimeout> } | null = null;
   private sequence = 0;
   /** False until the first view mounts: focus is never moved on the initial page view (AC-13). */
   private hasMounted = false;
@@ -77,6 +92,8 @@ export class SpaceManager {
     this.reducedMotion = options.reducedMotion;
     this.registry = options.registry ?? spaces;
     this.status = options.statusElement ?? document.body;
+    this.loading = options.loading ?? null;
+    this.loadingDelayMs = options.loadingDelayMs ?? LOADING_DELAY_MS;
   }
 
   /** Id of the mounted registry Space; null on the gallery or when nothing is mounted. */
@@ -105,6 +122,7 @@ export class SpaceManager {
   async close(): Promise<void> {
     ++this.sequence;
     this.target = null;
+    this.stopLoading();
     this.clearStatus();
     delete this.status.dataset.view;
     clearMessage(this.engine.overlay);
@@ -118,6 +136,7 @@ export class SpaceManager {
    */
   suspend(): void {
     ++this.sequence;
+    this.stopLoading();
     this.clearStatus();
     clearMessage(this.engine.overlay);
     this.unmount();
@@ -135,6 +154,7 @@ export class SpaceManager {
     this.target = { view, id, source };
     const isStale = () => token !== this.sequence;
     const label = id ?? view;
+    this.stopLoading(); // a newer request replaces any indication for an older one
     this.clearStatus();
     // Set immediately, not after the fade: chrome such as the back link keys off it and must not flash.
     this.status.dataset.view = view;
@@ -143,6 +163,24 @@ export class SpaceManager {
     if (isStale()) return 'superseded';
     clearMessage(this.engine.overlay);
 
+    // Timed from here, after the fade: only the loading itself counts towards the delay.
+    const title = id === null ? view : (findSpace(id, this.registry)?.title ?? id);
+    this.startLoading(token, title);
+    try {
+      return await this.build(token, view, id, label, source);
+    } finally {
+      this.stopLoading(token);
+    }
+  }
+
+  private async build(
+    token: number,
+    view: ViewName,
+    id: string | null,
+    label: string,
+    source: FactorySource,
+  ): Promise<OpenResult> {
+    const isStale = () => token !== this.sequence;
     let factory: SpaceFactory;
     try {
       const found = await source();
@@ -182,6 +220,7 @@ export class SpaceManager {
     this.hasMounted = true;
     await this.engine.nextFrame();
     if (isStale()) return 'superseded';
+    this.stopLoading(token); // gone before the view fades in
 
     await this.fader.in();
     if (isStale()) return 'superseded';
@@ -217,6 +256,22 @@ export class SpaceManager {
     } catch (error) {
       console.error(`Space "${label}" threw during dispose()`, error);
     }
+  }
+
+  private startLoading(token: number, title: string): void {
+    if (!this.loading) return;
+    const loading = this.loading;
+    const timer = setTimeout(() => loading.show(title), this.loadingDelayMs);
+    this.loadingFor = { token, timer };
+  }
+
+  /** Cancels the pending timer and hides the indicator; with `token`, only if it belongs to that request. */
+  private stopLoading(token?: number): void {
+    if (!this.loading) return;
+    if (token !== undefined && this.loadingFor?.token !== token) return;
+    if (this.loadingFor) clearTimeout(this.loadingFor.timer);
+    this.loadingFor = null;
+    this.loading.hide();
   }
 
   private clearStatus(): void {

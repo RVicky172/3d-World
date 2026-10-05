@@ -1,3 +1,4 @@
+import { cpus } from 'node:os';
 import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 4173;
@@ -5,6 +6,13 @@ const PORT = 4173;
 const SUBPATH_PORT = 4174;
 const SUBPATH_BASE = '/3d-World/';
 const SUBPATH_SPEC = /subpath\.spec\.ts/;
+
+/**
+ * Parallel browsers. Every worker renders WebGL in software (SwiftShader, one thread per core), so
+ * Playwright's default of half the cores (12 on a 24-core machine) saturated CPU and memory and crashed
+ * the developer's machine once the 010 model viewer arrived. Cap it; override with E2E_WORKERS=n.
+ */
+const WORKERS = Number(process.env.E2E_WORKERS) || Math.min(4, Math.max(1, Math.floor(cpus().length / 4)));
 
 const chrome = {
   ...devices['Desktop Chrome'],
@@ -15,6 +23,7 @@ const chrome = {
 export default defineConfig({
   testDir: 'tests/e2e',
   fullyParallel: true,
+  workers: WORKERS,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',

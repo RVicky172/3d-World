@@ -3,9 +3,9 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createControlsUi } from './controls-ui';
 import { keyAction, orbitStep, panStep, zoomStep, type KeyAction } from './keyboard';
 import { Turntable } from './turntable';
-import type { CameraControls, CameraControlsOptions } from './types';
+import type { CameraControls, CameraControlsOptions, ControlsHome } from './types';
 
-export type { CameraControls, CameraControlsConfig, CameraControlsOptions } from './types';
+export type { CameraControls, CameraControlsConfig, CameraControlsOptions, ControlsHome } from './types';
 
 const DAMPING = 0.08;
 const CANVAS_ATTRIBUTES = ['tabindex', 'role', 'aria-label'] as const;
@@ -44,7 +44,9 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
   const turntable = new Turntable(config.turntable.idleDelay, !reducedMotion);
   const ui = createControlsUi({ overlay, signal, coarsePointer, onReset: () => reset() });
 
+  let userMoved = false;
   const interact = () => {
+    userMoved = true;
     turntable.interact();
     orbit.autoRotate = false;
     ui.dismissHint();
@@ -62,6 +64,27 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
     orbit.update();
     orbit.reset();
     orbit.enableDamping = damping;
+    userMoved = false;
+  }
+
+  function setHome(home: ControlsHome) {
+    orbit.minDistance = home.distance.min;
+    orbit.maxDistance = home.distance.max;
+    orbit.maxTargetRadius = home.panLimit;
+    // The state reset() returns to (what saveState() would store, without moving the camera).
+    orbit.target0.copy(focus);
+    orbit.position0.set(...home.position);
+    orbit.zoom0 = camera.zoom;
+    if (!userMoved) {
+      orbit.target.copy(focus);
+      camera.position.set(...home.position);
+    }
+    // Clamp a moved camera into the new limits. Without a delta, update() would also add a 60 fps
+    // turntable step, so switch auto-rotation off for this call; the next frame restores it.
+    const autoRotate = orbit.autoRotate;
+    orbit.autoRotate = false;
+    orbit.update();
+    orbit.autoRotate = autoRotate;
   }
 
   const apply = (action: KeyAction) => {
@@ -115,6 +138,10 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
       return turntable.active;
     },
     target: orbit.target,
+    get userMoved() {
+      return userMoved;
+    },
+    setHome,
     dispose() {
       if (disposed) return;
       disposed = true;

@@ -85,3 +85,45 @@ Format:
 **Decision:** (1) After a WebGL context loss, show a message with a "Reload" button, and if the browser restores the context, reopen the current view automatically. (2) A change to `prefers-reduced-motion` applies from the next view opened (CSS rules update live). (3) There is no on-page motion toggle; the OS setting is the only source. (4) The WebGL fallback stays a plain message without a list of Spaces.
 **Alternatives:** Reload button only, or auto-recovery only; live reconfiguration of the open view's turntable, damping and starfield; a persisted on-page toggle; a text-only list of Spaces on the fallback.
 **Consequences:** No reactive motion state has to be threaded through Spaces or controls. Context restore reuses `SpaceManager`'s open path. AC-11 becomes a no-op constraint.
+
+## D-012 — Model viewer choices for 010 (2026-10-05)
+
+**Context:** Spec 010 open questions. The project lead delegated the choices: a learning project, so prefer simple and well documented.
+**Decision:**
+
+1. The first model is the Khronos glTF sample "DamagedHelmet" (theblueturtle_, CC-BY 4.0, about 3.7 MB GLB). Its attribution is shown inside the Space and recorded in `CREDITS.md`.
+2. Each model is its own Space (card + URL). The reusable viewer (load, frame, light) lives in `src/shared/`.
+3. Lighting comes from a generated studio environment, with no HDRI asset, and the background stays the site's `--bg`.
+4. The demo cube stays as the framework demo, listed after the model.
+5. The GLB ships uncompressed in 010; compression comes in 011.
+
+**Alternatives:** A CC0 Poly Haven model (no attribution needed, but less of a reference scene). A single viewer Space with a model switcher. A bundled CC0 HDRI (more realistic, +1–2 MB). Removing the demo cube. Compressing the GLB already in 010.
+**Consequences:** Phase 2 adds `src/shared/` viewer code that the solar system can reuse for loading. A CC-BY asset needs a visible credit line in the UI. The model Space is the first one with real network-loaded assets, so the "Failed to load" path becomes reachable for asset errors, not just module errors.
+
+## D-013 — 10 KB entry allowance for 010 (2026-10-05)
+
+**Context:** The 010 T001 spike measured the entry bundle at +8.3 KB gzipped (134.9 → 143.2 KB) once a lazy Space imports `GLTFLoader` and `RoomEnvironment`. The three core classes they use join the shared `three` chunk that the entry loads (same effect as D-010). Spec 010 allowed only ≤ 1 KB.
+**Decision:** The spec 010 entry-growth NFR is amended to ≤ 10 KB gzipped, with the measured +8.3 KB recorded. The Constitution's 250 KB total budget is unchanged.
+**Alternatives:** Dropping the per-feature cap (total budget only): simpler, but large jumps go unnoticed. A build-config workaround to keep lazy-only three classes out of the entry: uncertain and complex, since `three.core.js` is one module that Rollup won't split.
+**Consequences:** Entry is about 143 KB after 010, leaving ~107 KB of headroom. Later loaders (DRACOLoader/KTX2Loader in 011) will add more; measure again in 011.
+
+## D-014 — SheenChair replaces DamagedHelmet for 010 (2026-10-05)
+
+**Context:** In 010 T002, the Khronos `LICENSE.md` for DamagedHelmet showed its model files are licensed under **both** CC-BY 4.0 (ctxwing's rebuild) and CC-BY-NC 4.0 (theblueturtle_'s original). NonCommercial is not allowed by Constitution IX. D-012 had assumed CC-BY only.
+**Decision:** The first model is Khronos "SheenChair": © 2020 Wayfair, LLC; Eric Chadwick; **CC0 1.0** for all model files; 4.1 MB GLB. Space id `sheen-chair`. A credit line is still shown in the Space. This supersedes D-012 point 1.
+**Alternatives:** GlamVelvetSofa (CC-BY 4.0, 3.1 MB); SunglassesKhronos (CC-BY 4.0, 0.4 MB, but includes Khronos trademark logos and uses transmission/iridescence). Over-budget CC0 models (WaterBottle 9 MB, Lantern 9.6 MB, Avocado 8.1 MB, ToyCar 5.4 MB) could be revisited after 011's compression.
+**Consequences:** Always read a model's `LICENSE.md` (all licences listed), not just its headline credit, before choosing. The model uses `KHR_materials_sheen` → `MeshPhysicalMaterial`.
+
+## D-015 — Cap local E2E parallelism (2026-10-05)
+
+**Context:** During 010, `npm run test:e2e` crashed the developer's machine (24 cores, 127 GB). Playwright's default local workers is half the cores (12). Each worker is a Chromium rendering WebGL in software (SwiftShader, itself one thread per core), and the new Space loads a 4 MB, 40k-triangle PBR model and generates a PMREM environment.
+**Decision:** `playwright.config.ts` sets `workers` to `min(4, max(1, floor(cores / 4)))`, overridable with `E2E_WORKERS=n`. Applies on CI too (CI runners have few cores, so the formula gives 1).
+**Alternatives:** Keep the default and ask the developer to pass `--workers`; serialise model-viewer tests only; drop SwiftShader for the host GPU (non-deterministic, and GPU driver load is its own crash risk).
+**Consequences:** Full suite (80 tests) runs in ~27 s at 4 workers, with no crash. Heavier future Spaces should keep this cap rather than raise it.
+
+## D-016 — AC-5 zoom-out floor is measured on the bounding sphere (2026-10-05)
+
+**Context:** 010 T072 measured the chair's on-screen outline at full zoom-out: ~7 % of the smaller viewport side (51 px at 1280×720), while AC-5 said "never below 10 %". The limit is `frameDistance(r, …, 0.1)` on the bounding sphere, which over-estimates open shapes (same effect as the chair's `fill: 0.85`).
+**Decision:** Amend AC-5: the 10 % floor applies to the bounding sphere; an open shape's outline may look smaller but stays clearly visible. No code change. Chosen by the user.
+**Alternatives:** A per-model `minFill` in data; scaling the floor automatically by each model's fill correction.
+**Consequences:** The E2E checks the camera distance against the sphere-based limit rather than pixel fill. Revisit if a future model gets lost at full zoom-out.

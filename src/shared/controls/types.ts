@@ -24,6 +24,13 @@ export interface KeySteps {
   panStep: number;
 }
 
+/** A home view: camera position (looking at the config's `focus`), zoom limits and pan limit. */
+export interface ControlsHome {
+  position: Vec3;
+  distance: { min: number; max: number };
+  panLimit: number;
+}
+
 export interface CameraControlsOptions {
   camera: PerspectiveCamera;
   canvas: HTMLCanvasElement;
@@ -44,5 +51,12 @@ export interface CameraControls {
   readonly turntableActive: boolean;
   /** Current focus point (moves when panning). Read-only for callers. */
   readonly target: Readonly<Vector3>;
+  /** True once the visitor moved the camera (any input); cleared by `reset()`. The turntable doesn't count. */
+  readonly userMoved: boolean;
+  /**
+   * Replaces the home view and limits (e.g. re-framing after a resize, spec 010 AC-3). Moves the camera
+   * there only if the visitor hasn't moved it; `reset()` always returns to the latest home.
+   */
+  setHome(home: ControlsHome): void;
   dispose(): void;
 }

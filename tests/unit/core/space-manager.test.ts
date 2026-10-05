@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PerspectiveCamera, Scene, type WebGLRenderer } from 'three';
 import { SpaceManager, type ManagedEngine, type Transition } from '../../../src/core/space-manager';
 import type { SpaceContext, SpaceFactory, SpaceInstance, SpaceMeta } from '../../../src/core/types';
@@ -369,6 +369,132 @@ describe('SpaceManager', () => {
 
     it('suspend() with nothing mounted does not throw', () => {
       expect(() => manager.suspend()).not.toThrow();
+    });
+  });
+
+  describe('loading indication (spec 010, AC-8)', () => {
+    let loading: {
+      show: ReturnType<typeof vi.fn<(label: string) => void>>;
+      hide: ReturnType<typeof vi.fn<() => void>>;
+    };
+    let slow: SpaceManager;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      loading = { show: vi.fn<(label: string) => void>(), hide: vi.fn<() => void>() };
+      a.meta.title = 'Space A';
+      slow = new SpaceManager({
+        engine,
+        fader,
+        registry: [a.meta, b.meta],
+        reducedMotion: () => false,
+        statusElement: status,
+        loading,
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    /** Makes the next load of `space` wait until the returned function is called. */
+    const holdLoad = async (space: ReturnType<typeof createSpace>) => {
+      const gate = deferred<{ default: SpaceFactory }>();
+      const real = await space.meta.load();
+      space.load.mockReturnValueOnce(gate.promise);
+      return () => gate.resolve(real);
+    };
+
+    it('shows nothing when the view opens within 250 ms', async () => {
+      const release = await holdLoad(a);
+      const opening = slow.open('a');
+      await vi.advanceTimersByTimeAsync(200);
+      release();
+      await expect(opening).resolves.toBe('opened');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(loading.show).not.toHaveBeenCalled();
+    });
+
+    it('shows the Space title after 250 ms and hides it once the view is shown', async () => {
+      const release = await holdLoad(a);
+      const opening = slow.open('a');
+      await vi.advanceTimersByTimeAsync(249);
+      expect(loading.show).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(loading.show).toHaveBeenCalledWith('Space A');
+
+      release();
+      await expect(opening).resolves.toBe('opened');
+      expect(loading.hide).toHaveBeenCalled();
+      expect(loading.show).toHaveBeenCalledTimes(1);
+    });
+
+    it('labels a non-registry view by its name', async () => {
+      const gate = deferred<void>();
+      const gallery = createSpace('gallery');
+      const factory = (await gallery.meta.load()).default;
+      const opening = slow.openView('gallery', async (ctx) => {
+        await gate.promise;
+        return factory(ctx);
+      });
+      await vi.advanceTimersByTimeAsync(300);
+      expect(loading.show).toHaveBeenCalledWith('gallery');
+      gate.resolve();
+      await opening;
+    });
+
+    it('hides it when the open fails (load-error)', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const gate = deferred<void>();
+      a.load.mockImplementationOnce(async () => {
+        await gate.promise;
+        throw new Error('offline');
+      });
+      const opening = slow.open('a');
+      await vi.advanceTimersByTimeAsync(300);
+      expect(loading.show).toHaveBeenCalled();
+      gate.resolve();
+      await expect(opening).resolves.toBe('load-error');
+      expect(loading.hide).toHaveBeenCalled();
+    });
+
+    it('hides it when the open is superseded, and the newer open manages its own', async () => {
+      const releaseA = await holdLoad(a);
+      const openA = slow.open('a');
+      await vi.advanceTimersByTimeAsync(300);
+      expect(loading.show).toHaveBeenCalledTimes(1);
+
+      const openB = slow.open('b'); // fast
+      await expect(openB).resolves.toBe('opened');
+      releaseA();
+      await expect(openA).resolves.toBe('superseded');
+
+      expect(loading.hide).toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(loading.show).toHaveBeenCalledTimes(1); // the stale timer never fires again
+    });
+
+    it('hides it on suspend() (context loss) and on close()', async () => {
+      const release = await holdLoad(a);
+      void slow.open('a');
+      await vi.advanceTimersByTimeAsync(300);
+      expect(loading.show).toHaveBeenCalledTimes(1);
+      loading.hide.mockClear();
+      slow.suspend();
+      expect(loading.hide).toHaveBeenCalled();
+
+      loading.hide.mockClear();
+      await slow.close();
+      expect(loading.hide).toHaveBeenCalled();
+      release();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(loading.show).toHaveBeenCalledTimes(1);
+    });
+
+    it('a pending timer is cancelled when the open finishes first', async () => {
+      await slow.open('a');
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(loading.show).not.toHaveBeenCalled();
     });
   });
 

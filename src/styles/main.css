@@ -88,6 +88,63 @@ body {
   color: var(--muted);
 }
 
+/* Model credit (spec 010, AC-13): bottom-left, clear of the controls bar; solid surface so contrast never depends on the model behind it. */
+.model-credit {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  max-width: calc(100% - 220px);
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.model-credit p {
+  margin: 0;
+}
+
+.model-credit a {
+  color: var(--fg);
+}
+
+.model-credit a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Loading indicator (spec 010, AC-8): above the fader (z 2), which covers the view while it opens. */
+.loading {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - 32px);
+  padding: 10px 18px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  animation: loading-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes loading-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading {
+    animation: none;
+  }
+}
+
 /* WebGL context lost (spec 005): above the fader (z 2) so it shows whatever state a swap was in; below the back link. */
 .context-lost {
   position: absolute;

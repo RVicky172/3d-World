@@ -241,6 +241,61 @@ describe('createCameraControls', () => {
     });
   });
 
+  describe('userMoved and setHome() (spec 010, AC-3, AC-5)', () => {
+    it('userMoved is false at start and while the turntable runs', () => {
+      create();
+      frames(120);
+      expect(controls.turntableActive).toBe(true);
+      expect(controls.userMoved).toBe(false);
+    });
+
+    it('becomes true on keyboard input or a pointer interaction, and reset() clears it', () => {
+      create();
+      press('ArrowLeft');
+      expect(controls.userMoved).toBe(true);
+      controls.reset();
+      expect(controls.userMoved).toBe(false);
+
+      wheel(100); // OrbitControls reports wheel zoom as start/end
+      expect(controls.userMoved).toBe(true);
+      press('r');
+      expect(controls.userMoved).toBe(false);
+    });
+
+    it('setHome() applies new limits and moves the camera there when the visitor has not moved it', () => {
+      create();
+      controls.setHome({ position: [0, 0, 6], distance: { min: 3, max: 12 }, panLimit: 2 });
+
+      expectAt(camera.position, [0, 0, 6]);
+      expectAt(controls.target, [0, 0, 0]);
+      for (let i = 0; i < 40; i++) press('-');
+      expect(distance()).toBeCloseTo(12, 6);
+      for (let i = 0; i < 40; i++) press('+');
+      expect(distance()).toBeCloseTo(3, 6);
+    });
+
+    it('setHome() leaves a moved camera where it is, but reset() goes to the new home', () => {
+      create();
+      press('ArrowLeft');
+      const before = pose();
+
+      controls.setHome({ position: [0, 0, 6], distance: { min: 2, max: 12 }, panLimit: 1 });
+      expect(pose()).toEqual(before);
+
+      controls.reset();
+      expectAt(camera.position, [0, 0, 6]);
+      expectAt(controls.target, [0, 0, 0]);
+    });
+
+    it('setHome() keeps a moved camera within the new limits', () => {
+      create();
+      press('ArrowLeft'); // moved, at distance 4
+      controls.setHome({ position: [0, 0, 6], distance: { min: 5, max: 12 }, panLimit: 1 });
+      frames(1);
+      expect(distance()).toBeCloseTo(5, 6);
+    });
+  });
+
   describe('teardown (AC-8)', () => {
     it('dispose() removes attributes, UI and listeners, and restores touch scrolling', () => {
       create(false);

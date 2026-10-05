@@ -277,7 +277,8 @@ test.describe('with reduced motion (input-driven only)', () => {
   test.describe('AC-13: focus is never lost when switching views', () => {
     test('keyboard round trip: card → 3D view; back link → the same card', async ({ page }) => {
       await gotoGallery(page);
-      await page.keyboard.press('Tab');
+      await page.keyboard.press('Tab'); // Sheen Chair
+      await page.keyboard.press('Tab'); // Demo Cube
       await page.keyboard.press('Enter');
       await expect(page.locator('body')).toHaveAttribute('data-space-ready', 'true');
       await expect(page.locator('body')).toHaveAttribute('data-space-id', 'demo-cube');

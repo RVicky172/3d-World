@@ -11,6 +11,60 @@ Newest first. One entry per working session.
 
 ---
 
+## 2026-10-05 — 010-model-viewer ✔️ Implemented
+
+**Done:**
+
+- `/spec-verify 010`. DoD:
+  - `npm run check` ✅ (31 files, 379 unit);
+  - `npm run test:e2e` ✅ (90, ~36 s at 4 workers);
+  - `npm run build` ✅ (entry 144.8 KB gzipped, budget 250 KB; sheen-chair 21.2 KB + 3.93 MB ≤ 5 MB; `__WORLD__` absent from production);
+  - a temporary probe across open, keys, resize, 3 round trips, lose/restore and 5 s of turntable logged no warnings or errors (only three's `Context Lost.` / `Context Restored.` logs).
+- All 14 ACs ticked; spec Implemented; roadmap 010 ✔️; T092 ticked.
+- Coverage notes: AC-5's mouse, touch, pan and focus behaviours are proven by 004's E2E on the shared controls, and the chair's turntable by `viewer.test.ts`. The chair E2E smoke-checks hint, help, keyboard, Reset and the zoom limits (as the plan specified). AC-9 is proven E2E for a network error (aborted request); a 404 takes the same loader-rejection path but has no E2E of its own.
+
+**Next:** commit 010; then `/spec-new` for 011 (asset pipeline).
+**Blockers:** none
+
+## 2026-10-05 — 010-model-viewer (spec → T002)
+
+**Done:**
+
+- Spec 010 drafted. Q1–Q5 resolved by delegation (D-012); plan and tasks written (23 tasks).
+- T001 spike: GLTFLoader + RoomEnvironment cost the entry +8.3 KB, so the NFR was amended to ≤ 10 KB (D-013, approved by the user).
+- T002: DamagedHelmet was rejected because its LICENSE.md also lists CC-BY-NC. The user chose SheenChair instead (CC0, 4.1 MB, 40k triangles; D-014). It is downloaded to `public/assets/sheen-chair/` with its CREDITS row. Spec, plan and tasks are updated (`sheen-chair`).
+
+- T010–T011: `src/shared/model-viewer/framing.ts` (`frameDistance`, `distanceLimits`, `fitModel`) and `types.ts` (`ModelViewerConfig`, `AssetCredit` with SPDX licence ids). 14 unit tests; 341 unit tests total green.
+
+- T020–T021: shared controls gain `userMoved` (any input sets it, `reset()` clears it, the turntable doesn't count) and `setHome({ position, distance, panLimit })`. It writes OrbitControls' `target0`/`position0`/`zoom0` directly, so Reset uses the new home without moving a camera the visitor has moved; it moves the camera only when `!userMoved`, and `update()` clamps into the new limits. 5 new tests; 346 unit + 73 E2E green (demo-cube unaffected).
+
+- T030–T033: `src/ui/loading.ts` (`role=status`, polite, "Loading <title>…", z 3 above the fader, pulse off under reduced motion). `SpaceManager` options `loading` / `loadingDelayMs` (default 250 ms); the timer starts **after** the fade-out, so normal 300 ms fades don't trigger it. The indicator hides before the fade-in, on every failure or supersession, and on `suspend()`/`close()`. The body moved into a private `build()` wrapped in try/finally. Wired in `main.ts`. 358 unit + 73 E2E green.
+
+- T040–T041: `createModelViewer(ctx, config, deps?)` with an injectable loader, environment and base URL.
+  - Order: load the GLB first (a failure allocates nothing) → `fitModel` → generated RoomEnvironment PMREM as `scene.environment` → controls → credit line.
+  - `resize()` re-frames along the current direction until the visitor moves the camera, then only updates the home.
+  - `credit.ts` shows `.model-credit` bottom-left.
+  - 11 unit tests.
+- T050–T051: `src/spaces/sheen-chair/` (data + one-line factory, `fill: 0.85` after a screenshot showed ~53 % fill at 0.75), registered first.
+  - Updated E2E tests that assumed a single or first demo-cube card (gallery AC-1/4/9, controls AC-13, resilience): they now select the demo-cube card by href, or press Tab twice.
+  - Screenshots at 1280×720 and 320×640: framed, lit, credit visible; ready in ~240 ms locally.
+- 374 unit + 73 E2E green. **Entry 144.8 KB = +9.9 KB vs 005, just inside the ≤ 10 KB NFR (D-013)**; sheen-chair chunk 15.4 KB gzipped + 4.1 MB GLB.
+
+- T060–T061: `checkSpaceBudgets()` + `spaceIdOf()` in `scripts/bundle-checks.mjs`. A Space's own chunk plus its lazy-only static imports (gzipped; entry files excluded) plus `public/assets/<id>/` (bytes as stored) must be ≤ 5 MB. `check-bundle.mjs` prints each Space's size and fails the build when one is over (sabotage at 3 MB → exit 1, naming sheen-chair). sheen-chair = 21.1 KB code + 3.93 MB assets. 379 unit tests green.
+
+- E2E crash fix: `npm run test:e2e` had crashed the machine (12 default workers × SwiftShader). `playwright.config.ts` now caps workers at `min(4, cores/4)`, override `E2E_WORKERS` (D-015). Full suite 80 tests in ~27 s, machine stable.
+- T070–T071: `contentBounds()` in fixtures (bounds + fill of the smaller side + mean luminance; positive check: demo-cube > 0.3, not-found canvas = 0). `model-viewer.spec.ts`: gallery card + open (AC-1), framing at 3 sizes (AC-2), resize/re-frame/Reset (AC-3), lit from 4 sides (AC-4). Sabotage `fill: 0.4` → AC-2/AC-3 fail. 379 unit + 80 E2E green.
+
+- T072: model-viewer E2E for zoom limits (radius derived from the home distance via `frameDistance`), controls smoke (hint, help, keyboard, Reset), reduced-motion stillness, accessible name + card text, credit line. Sabotage of `MIN_DISTANCE_FACTOR` and `MIN_FILL` → fails. A probe found the chair outline at ~7 % at full zoom-out: AC-5 amended to measure the bounding sphere (D-016, user's choice). 379 unit + 85 E2E green.
+
+- T073: model-viewer E2E for the delayed-GLB loading status (AC-8), aborted GLB → "Failed to load" + back link with only the two expected console errors (AC-9), 10 round trips (AC-10), lose/restore framed + lit (AC-11), same-origin request log (AC-12). **AC-10 found a real leak:** +1 GPU texture per visit, because the PMREM environment is a render-target texture that `texture.dispose()` doesn't free. Fixed in `createStudioEnvironment` (dispose the target when the texture is disposed). 379 unit + 90 E2E green.
+
+- T090: `specs/architecture.md` gains a Model Viewer section, loading indicator in the open sequence, `.loading` at z 3, layout, render-target disposal rule, seams (`ModelViewerDeps`, `page.route`, `contentBounds`), and the E2E worker cap. `tech-stack.md`: RoomEnvironment/PMREM lighting row, GLTFLoader-only in 010, ≤ 4 workers.
+- T091: check (379), E2E (90) and build all green; entry 144.8 KB gzipped; sheen-chair 21.2 KB + 3.93 MB; `__WORLD__` absent from production.
+
+**Next:** T092 via `/spec-verify 010`, then commit.
+**Blockers:** none
+
 ## 2026-10-05 — 005-resilience-reduced-motion ✔️ Implemented (Phase 1 complete)
 
 **Done:**

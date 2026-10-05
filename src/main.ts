@@ -10,6 +10,7 @@ import { createGalleryView } from './gallery';
 import { findSpace, spaces } from './spaces/registry';
 import { createBackLink } from './ui/back-link';
 import { Fader } from './ui/fader';
+import { createLoadingIndicator } from './ui/loading';
 import { renderWebGLFallback } from './ui/fallback';
 
 const app = document.querySelector<HTMLElement>('#app');
@@ -36,7 +37,9 @@ function startApp(app: HTMLElement, renderer: WebGLRenderer): void {
 
   const engine = new Engine({ container: app, renderer });
   const fader = new Fader(app, { reducedMotion, covered: true });
-  const manager = new SpaceManager({ engine, fader, reducedMotion });
+  // "Loading <title>…" above the fader for slow opens (spec 010, AC-8).
+  const loading = createLoadingIndicator(app);
+  const manager = new SpaceManager({ engine, fader, reducedMotion, loading });
   // Home page (spec 003): a view built from registry metadata only, so no Space code loads here.
   const gallery = createGalleryView({ spaces, baseUrl: import.meta.env.BASE_URL });
   createBackLink(app);

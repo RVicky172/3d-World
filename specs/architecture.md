@@ -27,7 +27,7 @@
 
 ```text
 src/
-  main.ts                 # bootstrap: WebGL check + renderer (or fallback) → startApp(): motion watcher → Engine → Fader → SpaceManager → gallery view + back link → ContextGuard → HashRouter.start()
+  main.ts                 # bootstrap: WebGL check + renderer (or fallback) → startApp(): motion watcher → Engine → Fader → loading indicator → SpaceManager → gallery view + back link → ContextGuard → HashRouter.start()
   core/
     types.ts              # the Space contract + RendererLike + OpenResult
     clock.ts              # Clock, createClock(), FakeClock: timestamps → { delta, elapsed }
@@ -46,6 +46,11 @@ src/
       turntable.ts        # idle auto-orbit state, advanced only by delta
       controls-ui.ts      # fading hint, "?" help disclosure, "Reset view" button
       types.ts            # CameraControlsConfig, CameraControlsOptions, CameraControls
+    model-viewer/
+      index.ts            # createModelViewer(): load GLB → centre → studio environment → controls → credit (010)
+      framing.ts          # pure: frameDistance(), distanceLimits(), fitModel()
+      credit.ts           # visible asset credit line (.model-credit)
+      types.ts            # ModelViewerConfig, AssetCredit (SPDX licence ids)
     dispose.ts            # disposeObject3D(): geometries, materials, textures (incl. uniforms, background)
   gallery/
     index.ts              # createGalleryView(): the gallery as a SpaceFactory (cards in overlay, starfield in scene)
@@ -57,18 +62,21 @@ src/
     messages.ts           # "Space not found" / "Failed to load" alerts in the overlay
     fallback.ts           # WebGL2-unavailable screen (sets data-webgl="unavailable")
     context-lost.ts       # "The 3D view stopped" alert with a Reload button (005)
+    loading.ts            # createLoadingIndicator(): "Loading <title>…" status (010)
   spaces/
     registry.ts           # spaces[] with lazy loaders, findSpace()
     <space-id>/
       index.ts            # default-exports a SpaceFactory; scene data as a typed config object
-  styles/main.css         # tokens; stacking: canvas → .overlay → .fader → .context-lost → .back-to-gallery
+      data.ts             # typed scene data (e.g. sheen-chair: ModelViewerConfig)
+  styles/main.css         # tokens; stacking: canvas → .overlay → .fader → .loading / .context-lost → .back-to-gallery
 scripts/
-  bundle-checks.mjs       # pure bundle rules (unit-tested)
+  bundle-checks.mjs       # pure bundle rules (unit-tested): entry budget, per-Space 5 MB (code + assets)
   check-bundle.mjs        # runs them on dist/ after `npm run build`
 tests/
   helpers/fakes.ts        # FakeScheduler, FakeVisibility, createFakeRenderer, createFakeContext
   unit/                   # Vitest, mirrors src/ (+ scripts/)
   e2e/                    # Playwright; fixtures.ts fails tests on console errors; subpath.spec.ts runs on /3d-World/
+                          # workers capped at min(4, cores/4), override with E2E_WORKERS (D-015)
 public/
   assets/<space-id>/      # models, textures (licensed; see CREDITS.md)
 ```
@@ -158,9 +166,12 @@ open(B) / openView('gallery', f)
   clear <body data-space-*>; set <body data-view="space" | "gallery"> immediately
   → fader.out()                       A still renders underneath
   → findSpace(B)                      unknown → close A, show "Space not found"  → 'not-found'
+  → start loading timer (250 ms)      fires → loading.show(title)   (010)
   → await load()                      rejects → close A, show "Failed to load"  → 'load-error'
   → A: abort signal, dispose(); engine.setInstance(null)   (never renders a disposed Space)
   → B = await factory(ctx)            throws  → show "Failed to load"           → 'load-error'
+                                      (a model Space downloads its GLB here, so asset errors land here too)
+  → loading.hide()                    also on every failure, supersession, suspend() and close()
   → engine.setInstance(B) → restore lost focus (not on the first view) → await engine.nextFrame() → fader.in()
   → <body data-space-id="B" data-space-status="opened" data-space-ready="true">  → 'opened'
                                       (data-space-id only for registry Spaces)
@@ -177,6 +188,10 @@ open(B) / openView('gallery', f)
 - **Never throws:** `open()` reports every failure through its result. Load and factory errors are also sent to
   `console.error`. An unknown id is not treated as an error (decision D-006).
 - **`close()`:** disposes the active Space, clears any message, and cancels any `open()` that is still running.
+- **Loading indicator (010, AC-8):** optional `loading` (from `createLoadingIndicator()`) and `loadingDelayMs`
+  (default 250 ms). The timer starts **after** the fade-out, so ordinary fades never show it, and a view that is
+  ready sooner never shows it. It reads "Loading <registry title>…" (the view's label for the gallery), is a
+  `role="status"`, `aria-live="polite"` element, and its pulse is off under reduced motion.
 
 ### Transition (Fader)
 
@@ -184,7 +199,7 @@ open(B) / openView('gallery', f)
 - **DOM order inside `#app`:** back link → canvas → overlay → fader. The back link is prepended so that Tab order
   matches the layout (back link → 3D view → view controls); z-index, not DOM order, decides what is drawn on top.
 - **Stacking inside `#app`:** canvas → `.overlay` (z 1, the view's DOM: gallery cards, Space UI, messages) →
-  `.fader` (z 2) → `.context-lost` (z 3, 005) → `.back-to-gallery` (z 4). The fader hides the whole view, both its 3D and its DOM, while
+  `.fader` (z 2) → `.loading` and `.context-lost` (z 3, 010/005) → `.back-to-gallery` (z 4). The fader hides the whole view, both its 3D and its DOM, while
   switching, so nothing half-removed is ever visible. Steady chrome sits above it.
 - It starts covered at boot, so the first Space only fades in.
 - With `prefers-reduced-motion`, swaps are instant. The preference is read on every fade, so a change made while the
@@ -301,6 +316,32 @@ label, config })` in its factory. It calls `controls.update(delta)` from `update
 - **Bundle note:** OrbitControls stays in the lazy chunk, but the three core classes it uses join the shared
   `three` module that the entry loads (+1.4 KB for 004, D-010).
 
+## Model Viewer (`src/shared/model-viewer/`, 010)
+
+"One object, many angles". A model Space is its data plus one line, `(ctx) => createModelViewer(ctx, CONFIG)`
+(D-012). The viewer and three's `GLTFLoader` ship only in lazy chunks, but the three core classes they use join the
+shared `three` module (+8.3 KB entry, D-013).
+
+- **Order:** load the GLB from `BASE_URL + model.path` **first**, so a failed download allocates nothing and
+  rejects into "Failed to load" (AC-9) → `fitModel()` centres the model on the origin and returns its
+  bounding-sphere radius `r` → studio environment → camera + shared controls → credit line.
+- **Framing (pure, `framing.ts`):** `frameDistance(r, fovY, aspect, fill)` puts the sphere at `fill` of the
+  smaller viewport dimension (portrait by width, landscape by height). Limits: `min = 1.2 r` (never inside),
+  `max = frameDistance(…, 0.1)` (the sphere never below 10 %, D-016). Near/far planes are `r/100` and `100 r`.
+  - The bounding sphere over-estimates open shapes, so data can raise `fill` (sheen-chair uses 0.85).
+- **Resize:** until the visitor moves the camera (`controls.userMoved`), the view re-frames along its current
+  direction. Afterwards only the home changes, so Reset frames for the new size. Both go through the additive
+  controls API `setHome({ position, distance, panLimit })`.
+- **Lighting:** three's procedural `RoomEnvironment`, baked once by `PMREMGenerator` into `scene.environment` (no
+  HDRI asset). The background stays null, showing the site's `--bg`. The PMREM result is a render-target texture,
+  so disposing it also disposes its render target (see Disposal Rules).
+- **Credit (`credit.ts`, AC-13):** `.model-credit`, bottom-left in the overlay and clear of the controls bar: one
+  line per asset, "<title> by <author> · <licence>", the title linking to the source.
+- **Data (`ModelViewerConfig`):** title, model path, camera FOV + direction, optional `fill`, turntable, and
+  `assets[]` (path, title, author, SPDX licence, source). A unit test checks every asset against `CREDITS.md`.
+- **Budget:** `check-bundle.mjs` sums each Space's own lazy code (gzipped) plus `public/assets/<id>/` and fails
+  the build over 5 MB (AC-12).
+
 ## Resilience & Reduced Motion (005)
 
 - **Boot:** `main.ts` creates the renderer only if `hasWebGL2()`, through `createRendererOrNull()`, because the
@@ -338,6 +379,8 @@ composers.
 - The E2E tests (001 AC-4, 003 AC-6) cycle a Space 10 times and assert that `renderer.info.memory` returns to its
   baseline. Take the baseline **after a warm-up visit** to a PBR Space: three.js creates a shared DFG lookup texture
   on the first physically based material and keeps it for the renderer's lifetime.
+- **Render-target textures** (e.g. a `PMREMGenerator` result) are freed only by `renderTarget.dispose()`;
+  `texture.dispose()` alone leaks them. Keep the target and dispose it with the texture (010 AC-10).
 
 ## Testability Seams
 
@@ -359,6 +402,9 @@ composers.
 | Context loss                  | GPU/driver reset on the renderer's canvas        | unit: `EventTarget` canvas + fake engine/manager; E2E: `__WORLD__.loseContext()`      |
 | Motion preference             | `matchMedia('(prefers-reduced-motion: reduce)')` | unit: fake `MediaQueryList` (`EventTarget` + `matches`); E2E: `page.emulateMedia()`   |
 | No WebGL2 / no renderer (E2E) | the browser                                      | init script patching `HTMLCanvasElement.prototype.getContext`                         |
+| Model loading (unit)          | `GLTFLoader`, PMREM studio environment, BASE_URL | `ModelViewerDeps`: stub `loader`, `createEnvironment`, `baseUrl`                      |
+| Slow / failed download (E2E)  | the network                                      | `page.route()` delaying or aborting the GLB                                           |
+| Framing and lighting (E2E)    | what the visitor sees                            | `contentBounds()`: drawing-buffer bounds, fill of the smaller side, mean luminance    |
 
 `window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory`, `cameraAspect`, `cameraPose`, and
 `loseContext` / `restoreContext` (three's `forceContextLoss/Restore`; restore only after `data-webgl="lost"`). It is installed behind a

@@ -134,7 +134,7 @@ test.describe('reduced motion changed while the page is open (spec 005, AC-10, A
     await page.getByRole('link', { name: /back to gallery/i }).click();
     await expect(body).toHaveAttribute('data-view', 'gallery');
     await expect(body).toHaveAttribute('data-space-ready', 'true');
-    const card = page.locator('.card').first();
+    const card = page.locator('a.card[href="#/space/demo-cube"]');
     await expect(card).not.toHaveCSS('transition-duration', '0s');
 
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -170,7 +170,7 @@ test.describe('with prefers-reduced-motion: every automatic motion is off (spec 
     await expect(body).toHaveAttribute('data-space-ready', 'true');
 
     // Gallery: card hover transition off, starfield still.
-    const card = page.locator('.card').first();
+    const card = page.locator('a.card[href="#/space/demo-cube"]');
     await expect(card).toHaveCSS('transition-duration', '0s');
     const first = await frame(page);
     await page.waitForTimeout(500); // intentional: comparing frames across time
