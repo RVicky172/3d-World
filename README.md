@@ -3,6 +3,14 @@
 Interactive 3D **Spaces** in the browser — from a single object you can inspect from every angle, to whole worlds
 of objects moving together (like a solar system). Static site, no backend.
 
+## Spaces
+
+| Space        | What it shows                                                                                                                                                        |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Solar System | The Sun, 8 planets and 7 major moons at stylised or true scale on their real orbits, with time controls, real surfaces, and click-to-fly selection with a facts card |
+| Sheen Chair  | One model from every angle, with a turntable, environment lighting and hotspots                                                                                      |
+| Demo Cube    | The minimal Space the framework is tested with                                                                                                                       |
+
 ## Quick start
 
 ```bash
