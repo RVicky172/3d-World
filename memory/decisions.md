@@ -376,3 +376,13 @@ stray check and rebuilds stay on the fine line (both rewritten together). Moons 
 **Consequences:** D-038's close-up accuracy is kept; a whole-system view draws 256-point planet lines again. The
 swap is at most a 0.5 px change. ~2 000 segment-distance checks per frame (8 × 256). `OrbitLines` gains
 `setView(eye, pixelAngle)` and `coarse(id)`. T054 implements it; T091 re-measures.
+
+## D-041 — The SDD workflow packaged as a skill, kept in the repo (2026-10-06)
+
+**Context:** The user wanted this project's spec-driven setup reusable in any project.
+**Decision:** `sdd-setup` skill (generic templates of `specs/`, `memory/`, `/spec-*` commands, a CLAUDE.md section,
+and `scripts/scaffold.py`, which never overwrites files) lives in `~/.claude/skills/` and is committed here in
+`.claude/skills/sdd-setup/`. The project's own commands and tasks template took the skill's wording: tests seen
+failing first, a break-the-code check, dated Result notes, tick only proven ACs, an AC coverage table.
+**Alternatives:** a template repository; keeping the skill only per user.
+**Consequences:** Two copies of the skill (user and project) — edit one, copy to the other.

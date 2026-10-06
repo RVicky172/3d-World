@@ -24,6 +24,7 @@ showcases (one model, many angles) and multi-object worlds (e.g. a solar system)
 - Work one task from `tasks.md` at a time; tick it only after its tests pass.
 - If code must diverge from the spec, update the spec (and its Changelog) first.
 - Slash commands: `/spec-new`, `/spec-plan`, `/spec-tasks`, `/spec-implement`, `/spec-verify`.
+- `.claude/skills/sdd-setup/` packages this workflow (templates + `scaffold.py`) to set it up in another repo.
 
 ## Key Docs
 
