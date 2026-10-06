@@ -1,13 +1,17 @@
-import { PerspectiveCamera, Quaternion, Scene, Vector3 } from 'three';
+import { PerspectiveCamera, Quaternion, Scene, Vector3, type WebGLRenderer } from 'three';
 import { prefersCoarsePointer } from '../../core/capabilities';
 import { readPreference, writePreference } from '../../core/preferences';
 import type { SpaceContext, SpaceFactory, SpaceInstance } from '../../core/types';
 import { createCameraControls } from '../../shared/controls';
+import { createKtx2, type Ktx2 } from '../../shared/ktx2';
 import { distanceLimits, frameDistance } from '../../shared/model-viewer/framing';
-import { BODIES, SOLAR_SYSTEM } from './data';
+import { BODIES, SKY, SOLAR_SYSTEM } from './data';
+import { createGlow } from './glow';
+import { createFader, loadImagery } from './imagery';
 import { createBodyMarkers } from './markers';
 import { createOrbitLines } from './orbit-lines';
 import { createScaleToggle } from './scale-toggle';
+import { createStarfield, decodeStars, type Starfield } from './stars';
 import { createPlacement, layout, systemExtent } from './scale';
 import { buildSystem } from './scene';
 import { advance, initialTime, RANGE, SPEEDS, type SimTime } from './time';
@@ -32,6 +36,19 @@ const FOLLOW_TOLERANCE = 1e-9;
 /** Seams for unit tests. */
 export interface SolarSystemDeps {
   storage?: Storage;
+  /** The KTX2 loader for the imagery (spec 022); owned by the imagery load, which frees it. */
+  createKtx2?: (renderer: WebGLRenderer) => Ktx2;
+  /** The star catalogue's bytes (spec 022). */
+  loadStars?: (url: string, signal: AbortSignal) => Promise<ArrayBuffer>;
+  /** Where the imagery and stars live. */
+  baseUrl?: string;
+}
+
+/** Our own static file, as bytes. */
+async function fetchBytes(url: string, signal: AbortSignal): Promise<ArrayBuffer> {
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(`${response.status} ${url}`);
+  return response.arrayBuffer();
 }
 
 /** What survives a WebGL context loss (spec 021, AC-12): the simulated time. */
@@ -62,6 +79,8 @@ const isSimTime = (value: unknown): value is SimTime => {
  * - **Real scale:** name markers show where the sub-pixel bodies are; a zoom that starts on one re-centres on it
  *   (D-023) and then follows it as it moves, until the visitor pans, resets or re-centres elsewhere (Q4).
  * - **Depth:** the near plane follows the nearest surface every frame, so real-scale distances don't flicker.
+ * - **Surfaces (022):** opens in plain colours; the imagery and the sky load in the background, each map fading
+ *   in as it arrives (progress in the compact indicator). Leaving or a context loss abandons them.
  */
 export async function createSolarSystem(
   ctx: SpaceContext,
@@ -81,6 +100,13 @@ export async function createSolarSystem(
   const scene = new Scene();
   const system = buildSystem(BODIES);
   scene.add(system.root);
+  const glow = createGlow(system.mesh('sun'));
+  const fader = createFader(ctx.reducedMotion);
+  /** Imagery and stars still arriving: abandoned on leaving, a context loss or dispose. */
+  const loading = new AbortController();
+  ctx.signal.addEventListener('abort', () => loading.abort(), { once: true, signal: loading.signal });
+  let stars: Starfield | null = null;
+  let viewportHeight = 1;
   system.applyLayout(layoutOf(mode));
   const placement = createPlacement(BODIES);
   const orbitLines = createOrbitLines(system.root, BODIES, layoutOf('stylised'), time.days);
@@ -242,12 +268,16 @@ export async function createSolarSystem(
     if (off > FOLLOW_TOLERANCE * (1 + following.point.length())) following = null;
   }
 
-  // --- Depth: near plane at half the nearest surface, far past the whole system.
+  // --- Depth: near plane at half the nearest surface (Saturn's: its rings' outer edge), far past the system.
   const radii = (id: string) => layoutOf(mode).get(id)!.radius;
+  const reach = new Map(BODIES.map((b) => [b.id, b.rings ? b.rings.outerKm / b.radiusKm : 1]));
   function fitDepth(force = false) {
     let nearest = Infinity;
     for (const body of BODIES) {
-      nearest = Math.min(nearest, camera.position.distanceTo(world(body.id)) - radii(body.id));
+      nearest = Math.min(
+        nearest,
+        camera.position.distanceTo(world(body.id)) - reach.get(body.id)! * radii(body.id),
+      );
     }
     const near = Math.min(NEAR.max, Math.max(NEAR.min, nearest / 2));
     const far = camera.position.length() + 2 * systemExtent(BODIES, layoutOf(mode));
@@ -260,11 +290,33 @@ export async function createSolarSystem(
   }
   fitDepth(true);
 
+  // --- Imagery and sky (spec 022): in the background, after the view is usable.
+  const baseUrl = deps.baseUrl ?? `${import.meta.env.BASE_URL}assets/solar-system/`;
+  void loadImagery({
+    bodies: BODIES,
+    baseUrl,
+    loader: (deps.createKtx2 ?? createKtx2)(ctx.renderer),
+    signal: loading.signal,
+    onTexture: (id, layer, texture) => fader.add(system.attach(id, layer, texture)),
+    onProgress: (fraction) => ctx.reportBackgroundProgress?.(fraction, 'imagery'),
+  });
+  (deps.loadStars ?? fetchBytes)(baseUrl + SKY.stars.file, loading.signal)
+    .then((bytes) => {
+      if (loading.signal.aborted) return;
+      stars = createStarfield(decodeStars(bytes));
+      stars.setPixelRatio(ctx.renderer.getPixelRatio());
+      scene.add(stars.points);
+    })
+    .catch((error: unknown) => {
+      if (!loading.signal.aborted) console.warn('Solar System: the star catalogue failed to load', error);
+    });
+
   return {
     scene,
     camera,
     // Plan §8: time → bodies (+ follow) → controls → follow check → depth → camera matrix → markers → date text.
     update(delta) {
+      fader.advance(delta);
       const step = advance(time, delta);
       time = step.time;
       if (step.limit) timeControls.announceLimit(step.limit);
@@ -276,6 +328,8 @@ export async function createSolarSystem(
       checkFollowing();
       fitDepth();
       camera.updateMatrixWorld(); // the controls moved the camera; markers project from this frame's pose
+      system.updateSun(camera);
+      glow.update(camera, viewportHeight);
       markers.update();
       if (time !== shown) {
         timeControls.set(time);
@@ -287,6 +341,8 @@ export async function createSolarSystem(
       aspect = width / height;
       camera.aspect = aspect;
       camera.updateProjectionMatrix();
+      viewportHeight = height;
+      stars?.setPixelRatio(ctx.renderer.getPixelRatio());
       markers.resize(width, height);
       // Untouched: re-frame along the current direction (keeps the turntable's angle). Moved: keep the view.
       const direction = controls.userMoved
@@ -310,6 +366,10 @@ export async function createSolarSystem(
       markers.invalidate();
     },
     dispose() {
+      loading.abort(); // late textures and stars are disposed as they arrive
+      fader.clear();
+      stars?.dispose();
+      glow.dispose();
       listeners.abort();
       controls.dispose();
       timeControls.dispose();

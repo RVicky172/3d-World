@@ -1,0 +1,420 @@
+{
+  "read": "2026-10-05",
+  "maps": [
+    {
+      "id": "sun",
+      "url": "https://www.solarsystemscope.com/textures/download/2k_sun.jpg",
+      "page": "https://www.solarsystemscope.com/textures/",
+      "credit": "Solar System Scope (INOVE), based on NASA mission data",
+      "licence": "CC BY 4.0",
+      "read": "2026-10-05",
+      "source": {
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/sun.jpg",
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "mercury",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia16/pia16298/PIA16298.jpg",
+      "page": "https://science.nasa.gov/photojournal/a-world-view/",
+      "credit": "NASA/Johns Hopkins University Applied Physics Laboratory/Carnegie Institution of Washington (MESSENGER)",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 3060,
+        "height": 1530,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/mercury.jpg",
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {
+        "tint": "#9a8f86"
+      }
+    },
+    {
+      "id": "venus",
+      "url": "https://www.solarsystemscope.com/textures/download/2k_venus_atmosphere.jpg",
+      "page": "https://www.solarsystemscope.com/textures/",
+      "credit": "Solar System Scope (INOVE), based on NASA mission data",
+      "licence": "CC BY 4.0",
+      "read": "2026-10-05",
+      "source": {
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/venus.jpg",
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "earth",
+      "url": "https://eoimages.gsfc.nasa.gov/images/imagerecords/73000/73909/world.topo.bathy.200412.3x5400x2700.jpg",
+      "page": "https://visibleearth.nasa.gov/images/73909",
+      "credit": "NASA Earth Observatory, Reto Stöckli (Blue Marble Next Generation, December 2004)",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 5400,
+        "height": 2700,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/earth.jpg",
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "earth-clouds",
+      "url": "https://eoimages.gsfc.nasa.gov/images/imagerecords/57000/57747/cloud_combined_2048.jpg",
+      "page": "https://visibleearth.nasa.gov/images/57747",
+      "credit": "NASA Goddard Space Flight Center, Reto Stöckli (Blue Marble clouds)",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/earth-clouds.jpg",
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "earth-night",
+      "url": "https://eoimages.gsfc.nasa.gov/images/imagerecords/144000/144898/BlackMarble_2016_3km.jpg",
+      "page": "https://visibleearth.nasa.gov/images/144898",
+      "credit": "NASA Earth Observatory, Joshua Stevens, Miguel Román (Black Marble 2016)",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 13500,
+        "height": 6750,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/earth-night.jpg",
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "earth-ocean",
+      "url": "https://www.solarsystemscope.com/textures/download/2k_earth_specular_map.tif",
+      "page": "https://www.solarsystemscope.com/textures/",
+      "credit": "Solar System Scope (INOVE), based on NASA mission data",
+      "licence": "CC BY 4.0",
+      "read": "2026-10-05",
+      "source": {
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/earth-ocean.jpg",
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "moon",
+      "url": "https://astrogeology.usgs.gov/ckan/dataset/db948a2d-4d6a-4775-a0d3-12613d36f9e7/resource/d24d5ef3-abc5-42ee-ac7c-4c3261106327/download/moon_lro_lroc-wac_mosaic_global_1024.jpg",
+      "page": "https://astrogeology.usgs.gov/search/map/moon_lro_lroc_wac_global_morphology_mosaic_100m",
+      "credit": "NASA/GSFC/Arizona State University (LROC WAC), USGS Astrogeology",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/moon.jpg",
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "mars",
+      "url": "https://astrogeology.usgs.gov/ckan/dataset/7131d503-cdc9-45a5-8f83-5126c0fd397e/resource/5ea881c6-01b3-41fa-a7af-42d2131b54f1/download/Mars_Viking_MDIM21_ClrMosaic_1km.jpg",
+      "page": "https://astrogeology.usgs.gov/search/map/mars_viking_colorized_global_mosaic_232m",
+      "credit": "NASA/JPL, NASA Ames, USGS Astrogeology (Viking MDIM 2.1 colourised)",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 21339,
+        "height": 10670,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/mars.jpg",
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "jupiter",
+      "url": "https://assets.science.nasa.gov/content/dam/science/psd/photojournal/pia/pia07/pia07782/PIA07782.jpg",
+      "page": "https://photojournal.jpl.nasa.gov/catalog/PIA07782",
+      "credit": "NASA/JPL/Space Science Institute (Cassini)",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 3601,
+        "height": 1801,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/jupiter.jpg",
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "saturn",
+      "url": "https://www.solarsystemscope.com/textures/download/2k_saturn.jpg",
+      "page": "https://www.solarsystemscope.com/textures/",
+      "credit": "Solar System Scope (INOVE), based on NASA mission data",
+      "licence": "CC BY 4.0",
+      "read": "2026-10-05",
+      "source": {
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/saturn.jpg",
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "saturn-rings",
+      "url": "https://www.solarsystemscope.com/textures/download/2k_saturn_ring_alpha.png",
+      "page": "https://www.solarsystemscope.com/textures/",
+      "credit": "Solar System Scope (INOVE), based on NASA mission data",
+      "licence": "CC BY 4.0",
+      "read": "2026-10-05",
+      "source": {
+        "width": 2048,
+        "height": 125,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/saturn-rings.png",
+        "width": 1024,
+        "height": 63,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "uranus",
+      "url": "https://www.solarsystemscope.com/textures/download/2k_uranus.jpg",
+      "page": "https://www.solarsystemscope.com/textures/",
+      "credit": "Solar System Scope (INOVE), based on NASA mission data",
+      "licence": "CC BY 4.0",
+      "read": "2026-10-05",
+      "source": {
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/uranus.jpg",
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "neptune",
+      "url": "https://www.solarsystemscope.com/textures/download/2k_neptune.jpg",
+      "page": "https://www.solarsystemscope.com/textures/",
+      "credit": "Solar System Scope (INOVE), based on NASA mission data",
+      "licence": "CC BY 4.0",
+      "read": "2026-10-05",
+      "source": {
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/neptune.jpg",
+        "width": 2048,
+        "height": 1024,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "io",
+      "url": "https://astrogeology.usgs.gov/ckan/dataset/f6924861-ce9c-490d-8a4b-7812a20f2de5/resource/a9fab679-8081-4144-9f58-45848836c8f5/download/full.jpg",
+      "page": "https://astrogeology.usgs.gov/search/map/io_galileo_ssi_voyager_color_merged_global_mosaic_1km",
+      "credit": "NASA/JPL, USGS Astrogeology (Galileo SSI / Voyager)",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/io.jpg",
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {}
+    },
+    {
+      "id": "europa",
+      "url": "https://astrogeology.usgs.gov/ckan/dataset/4080036f-afc5-422e-abe9-1c0c8e4f98ea/resource/3647e7b3-425e-4dcf-951b-cc4a22fb0129/download/europa_voyager_galileossi_global_mosaic_500m_1024.jpg",
+      "page": "https://astrogeology.usgs.gov/search/map/Europa/Voyager-Galileo/Europa_Voyager_GalileoSSI_global_mosaic_500m",
+      "credit": "NASA/JPL, USGS Astrogeology (Voyager / Galileo SSI)",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": 0
+      },
+      "output": {
+        "file": "assets-src/solar-system/europa.jpg",
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {
+        "tint": "#cfc2a8",
+        "fillNoData": "pixels ≤ 10 → mapped mean"
+      }
+    },
+    {
+      "id": "ganymede",
+      "url": "https://astrogeology.usgs.gov/ckan/dataset/e1422336-3291-4b65-b903-c942d53de073/resource/eb32abd7-fee2-47d1-9f96-9d7d8824cc3a/download/ganymede_voyager_galileossi_global_clrmosaic_1024.jpg",
+      "page": "https://astrogeology.usgs.gov/search/map/ganymede_voyager_galileo_ssi_color_global_mosaic_1_4km",
+      "credit": "NASA/JPL, USGS Astrogeology (Voyager / Galileo SSI)",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": 0
+      },
+      "output": {
+        "file": "assets-src/solar-system/ganymede.jpg",
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {
+        "fillNoData": "pixels ≤ 10 → mapped mean"
+      }
+    },
+    {
+      "id": "callisto",
+      "url": "https://astrogeology.usgs.gov/ckan/dataset/a80abd68-7ed9-440e-829a-76376779164f/resource/ac628525-cb1c-4742-928b-5a0a60f372cd/download/callisto_voyager_galileossi_global_mosaic_1024.jpg",
+      "page": "https://astrogeology.usgs.gov/search/map/callisto_galileo_voyager_global_mosaic_1km",
+      "credit": "NASA/JPL, USGS Astrogeology (Galileo SSI / Voyager)",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": 0
+      },
+      "output": {
+        "file": "assets-src/solar-system/callisto.jpg",
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {
+        "tint": "#6e655c",
+        "fillNoData": "pixels ≤ 10 → mapped mean"
+      }
+    },
+    {
+      "id": "titan",
+      "url": "https://planetarymaps.usgs.gov/mosaic/Titan_ISS_P19658_Mosaic_Global_4km.tif",
+      "page": "https://astrogeology.usgs.gov/search/map/titan_cassini_iss_global_mosaic_4005m",
+      "credit": "NASA/JPL/Space Science Institute (Cassini ISS), USGS Astrogeology",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 4040,
+        "height": 2020,
+        "leftEdgeLongitudeDeg": 0
+      },
+      "output": {
+        "file": "assets-src/solar-system/titan.jpg",
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {
+        "tint": "#d4a95a",
+        "contrast": 0.35
+      }
+    },
+    {
+      "id": "triton",
+      "url": "https://astrogeology.usgs.gov/ckan/dataset/445b4c39-e87a-4e4d-88a8-e48d8e755c5c/resource/de0ba9f1-303e-4e5f-a99a-3201fba9a764/download/triton_voyager2_clrmosaic_1024.jpg",
+      "page": "https://astrogeology.usgs.gov/search/map/triton_voyager_2_global_color_mosaic_600m",
+      "credit": "NASA/JPL, Lunar and Planetary Institute (Paul Schenk), USGS Astrogeology (Voyager 2)",
+      "licence": "Public domain",
+      "read": "2026-10-05",
+      "source": {
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "output": {
+        "file": "assets-src/solar-system/triton.jpg",
+        "width": 1024,
+        "height": 512,
+        "leftEdgeLongitudeDeg": -180
+      },
+      "treatment": {
+        "fillNoData": "pixels ≤ 10 → mapped mean"
+      }
+    }
+  ]
+}

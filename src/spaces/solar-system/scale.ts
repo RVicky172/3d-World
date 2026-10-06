@@ -9,6 +9,7 @@ type Vec3 = [number, number, number];
  * - **Real:** one linear scale, `REAL_UNIT_KM` per unit, for every radius and distance.
  * - **Stylised:** radii compressed by a power curve (the Sun capped); moons on rings by their true order;
  *   planets on packed rings, each clear of its neighbours at any angle (so 021's motion can't make them collide),
+ *   a ringed planet's extent counting its rings (022),
  *   with a log term so wider true gaps stay wider.
  * `distance` is from the body's parent's centre.
  */
@@ -43,8 +44,9 @@ function stylisedLayout(bodies: readonly BodyData[], config: typeof STYLISED): M
 
   const planets = bodies.filter((b) => b.kind === 'planet').sort(byDistance);
   for (const planet of planets) {
-    // Moons by their true order, each on its own ring outside the previous one.
-    let edge = radius(planet);
+    // Moons by their true order, each on its own ring outside the previous one, and outside the planet's own rings
+    // (022, AC-7: Saturn's reach 2.349 × its drawn radius).
+    let edge = radius(planet) * (planet.rings ? planet.rings.outerKm / planet.radiusKm : 1);
     for (const moon of bodies.filter((b) => b.parent === planet.id).sort(byDistance)) {
       const r = radius(moon);
       const distance = edge + config.moonGap + r;

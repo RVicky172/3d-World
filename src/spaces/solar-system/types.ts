@@ -55,6 +55,28 @@ export interface Rotation {
   primeMeridianDeg: [number, number];
 }
 
+/**
+ * A map in `public/assets/solar-system/` (spec 022, D-031): KTX2, equirectangular, east to the right. The fetch
+ * script brings every source to 0° longitude at the centre, so `leftEdgeLongitudeDeg` is −180 for all of them.
+ */
+export interface Imagery {
+  file: string;
+  leftEdgeLongitudeDeg: number;
+  /** File size, for download progress; a unit test checks it against the file. */
+  bytes: number;
+}
+
+/** Saturn's rings (spec 022, AC-7): sourced radii from the planet's centre, and a radial colour/opacity strip. */
+export interface Rings {
+  innerKm: number;
+  outerKm: number;
+  /**
+   * A radial colour/opacity strip spanning `spanKm` from Saturn's centre (left → right), wider than the ring band:
+   * calibrated in 022 T041 by fitting the C ring's inner edge, the Cassini Division and the A ring's outer edge.
+   */
+  profile: Imagery & { spanKm: [number, number] };
+}
+
 export interface BodyData {
   /** Kebab-case, unique. */
   id: string;
@@ -78,6 +100,12 @@ export interface BodyData {
   rotation: Rotation;
   /** Fixed angle on its orbit until 021 adds motion (Q1), in degrees, 0–360. */
   displayAngleDeg: number;
+  /** Surface map (022). */
+  imagery: Imagery;
+  /** Earth only (022, Q4): clouds (alpha), night lights (emissive), ocean mask (roughness). */
+  layers?: { clouds: Imagery; night: Imagery; ocean: Imagery };
+  /** Saturn only (022, Q5). */
+  rings?: Rings;
 }
 
 /** Where a value came from (AC-4). `covers` names the kinds of data it supplies. */
@@ -87,7 +115,7 @@ export interface DataSource {
   licence: string;
   /** ISO date the values were read. */
   read: string;
-  covers: Array<'physical' | 'planet-orbits' | 'moon-orbits' | 'rotation'>;
+  covers: Array<'physical' | 'planet-orbits' | 'moon-orbits' | 'rotation' | 'imagery' | 'rings' | 'stars'>;
 }
 
 /** Per body, in scene units: distance from its parent's centre, and display radius. */

@@ -3,7 +3,8 @@ import { announcementFor, clampProgress } from '../core/progress';
 const INDICATOR_CLASS = 'loading';
 
 export interface LoadingIndicatorUi {
-  show(label: string): void;
+  /** `background`: the compact variant for content arriving after a view is ready (spec 022). */
+  show(label: string, options?: { background?: boolean }): void;
   /**
    * Download progress, 0–1 (spec 011, AC-8). The first value turns the indicator determinate; null (total
    * unknown) keeps 010's look until a value arrives. Ignored while hidden.
@@ -70,7 +71,7 @@ export function createLoadingIndicator(container: HTMLElement): LoadingIndicator
   };
 
   return {
-    show(label) {
+    show(label, { background = false } = {}) {
       hide();
       if (!announcer) {
         announcer = document.createElement('div');
@@ -81,7 +82,7 @@ export function createLoadingIndicator(container: HTMLElement): LoadingIndicator
       }
       announcer.textContent = ''; // so the same title can be announced again
       const element = document.createElement('div');
-      element.className = INDICATOR_CLASS;
+      element.className = background ? `${INDICATOR_CLASS} is-background` : INDICATOR_CLASS;
       element.setAttribute('role', 'status');
       element.setAttribute('aria-live', 'polite');
       const spoken = document.createElement('span');

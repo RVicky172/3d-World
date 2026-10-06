@@ -1,4 +1,4 @@
-import type { BodyData, DataSource } from './types';
+import type { BodyData, DataSource, Imagery } from './types';
 
 /**
  * The Sun, the eight planets and the seven moons with a radius ≥ 1 000 km (spec 020, D-022), as data
@@ -64,6 +64,15 @@ const spin = (ra: [number, number], dec: [number, number], pm: [number, number])
   primeMeridianDeg: pm,
 });
 
+/**
+ * A map in public/assets/solar-system/ (022, D-031), sized as built by `npm run assets` (a test checks it). The
+ * fetch script centres every source on 0°, so each starts at −180°.
+ */
+const map = (file: string, bytes: number): Imagery => ({ file, leftEdgeLongitudeDeg: -180, bytes });
+
+/** The night sky (022, AC-9): the Yale Bright Star Catalogue packed by scripts/build-star-catalogue.mjs. */
+export const SKY = { stars: { file: 'stars.bin', bytes: 54584 } } as const;
+
 export const SOURCES: readonly DataSource[] = [
   {
     name: 'JPL Horizons, physical data of each body (radius, GM, rotation, obliquity)',
@@ -99,6 +108,34 @@ export const SOURCES: readonly DataSource[] = [
     licence: 'Public domain (NASA/JPL, US government work)',
     read: '2026-10-05',
     covers: ['moon-orbits'],
+  },
+  {
+    name: 'NASA/JPL, NASA Earth Observatory and USGS Astrogeology maps (Blue Marble, Black Marble, MESSENGER, Viking, Cassini, Galileo, Voyager, LROC); each listed in CREDITS.md',
+    url: 'https://astrogeology.usgs.gov/search',
+    licence: 'Public domain (NASA/USGS, US government work)',
+    read: '2026-10-06',
+    covers: ['imagery'],
+  },
+  {
+    name: 'Solar System Scope textures (the Sun, Venus, Saturn and its rings, Uranus, Neptune, Earth’s ocean mask)',
+    url: 'https://www.solarsystemscope.com/textures/',
+    licence: 'CC BY 4.0',
+    read: '2026-10-06',
+    covers: ['imagery'],
+  },
+  {
+    name: 'PDS Ring-Moon Systems Node, Vital Statistics for Saturn’s Rings (C ring inner edge, A ring outer edge)',
+    url: 'https://pds-rings.seti.org/saturn/saturn_rings_table.html',
+    licence: 'Public domain (NASA PDS)',
+    read: '2026-10-06',
+    covers: ['rings'],
+  },
+  {
+    name: 'Yale Bright Star Catalogue, 5th revised edition (Hoffleit & Warren 1991), CDS V/50',
+    url: 'https://cdsarc.cds.unistra.fr/viz-bin/cat/V/50',
+    licence: 'Public domain (freely distributed scientific catalogue, D-031)',
+    read: '2026-10-06',
+    covers: ['stars'],
   },
 ];
 
@@ -174,6 +211,7 @@ export const BODIES: readonly BodyData[] = [
     colour: 0xffcc66,
     rotation: spin([286.13, 0], [63.87, 0], [84.176, 14.1844]),
     displayAngleDeg: 0,
+    imagery: map('sun.ktx2', 98503),
   },
   // Planets: physical data from Horizons; orbits a, e, I, L, ϖ, Ω from Table 1; periods from phys_par.
   {
@@ -198,6 +236,7 @@ export const BODIES: readonly BodyData[] = [
     colour: 0x9a8f86,
     rotation: spin([281.0103, -0.0328], [61.4155, -0.0049], [329.5988, 6.1385108]),
     displayAngleDeg: 25,
+    imagery: map('mercury.ktx2', 337222),
   },
   {
     id: 'venus',
@@ -221,6 +260,7 @@ export const BODIES: readonly BodyData[] = [
     colour: 0xd9b77a,
     rotation: spin([272.76, 0], [67.16, 0], [160.2, -1.4813688]),
     displayAngleDeg: 130,
+    imagery: map('venus.ktx2', 188404),
   },
   {
     id: 'earth',
@@ -245,6 +285,12 @@ export const BODIES: readonly BodyData[] = [
     colour: 0x3d6fb6,
     rotation: spin([0, -0.641], [90, -0.557], [190.147, 360.9856235]),
     displayAngleDeg: 215,
+    imagery: map('earth.ktx2', 274513),
+    layers: {
+      clouds: map('earth-clouds.ktx2', 93686),
+      night: map('earth-night.ktx2', 37511),
+      ocean: map('earth-ocean.ktx2', 36235),
+    },
   },
   {
     id: 'mars',
@@ -271,6 +317,7 @@ export const BODIES: readonly BodyData[] = [
     // 54.432516 → 52.886346, matching IAU 2009). Without it the tilt to the orbit came out 1.3° off (021 T010).
     rotation: spin([317.681106, -0.10927547], [52.886346, -0.05827105], [176.049863, 350.891982443297]),
     displayAngleDeg: 300,
+    imagery: map('mars.ktx2', 333243),
   },
   {
     id: 'jupiter',
@@ -294,6 +341,7 @@ export const BODIES: readonly BodyData[] = [
     colour: 0xc9a77c,
     rotation: spin([268.056595, -0.006499], [64.495303, 0.002413], [284.95, 870.536]),
     displayAngleDeg: 40,
+    imagery: map('jupiter.ktx2', 297371),
   },
   {
     id: 'saturn',
@@ -317,6 +365,14 @@ export const BODIES: readonly BodyData[] = [
     colour: 0xd8c48c,
     rotation: spin([40.589, -0.036], [83.537, -0.004], [38.9, 810.7939024]),
     displayAngleDeg: 160,
+    imagery: map('saturn.ktx2', 135221),
+    // PDS Rings Node: the C ring's inner edge to the A ring's outer edge (1.279–2.349 × the drawn, mean radius).
+    rings: {
+      innerKm: 74_490,
+      outerKm: 136_780,
+      // The Solar System Scope strip spans ~69 470–141 870 km (fit to three ring edges, residuals ≤ 0.02, T041).
+      profile: { ...map('saturn-rings.ktx2', 12413), spanKm: [69_470, 141_870] },
+    },
   },
   {
     id: 'uranus',
@@ -340,6 +396,7 @@ export const BODIES: readonly BodyData[] = [
     colour: 0x9fd3db,
     rotation: spin([257.311, 0], [-15.175, 0], [203.81, -501.1600928]),
     displayAngleDeg: 250,
+    imagery: map('uranus.ktx2', 7470),
   },
   {
     id: 'neptune',
@@ -363,6 +420,7 @@ export const BODIES: readonly BodyData[] = [
     colour: 0x4a6fd6,
     rotation: spin([299.36, 0], [43.46, 0], [249.978, 541.1397757]),
     displayAngleDeg: 335,
+    imagery: map('neptune.ktx2', 89801),
   },
   // Moons: physical data from Horizons; orbits a, e, ω, M, i, Ω, P from the mean elements (epoch J2000).
   {
@@ -378,6 +436,7 @@ export const BODIES: readonly BodyData[] = [
     colour: 0xb8b8b8,
     rotation: spin([269.9949, 0.0031], [66.5392, 0.013], [38.3213, 13.17635815]),
     displayAngleDeg: 60,
+    imagery: map('moon.ktx2', 90290),
   },
   {
     id: 'io',
@@ -392,6 +451,7 @@ export const BODIES: readonly BodyData[] = [
     colour: 0xe8d46a,
     rotation: spin([268.05, -0.009], [64.5, 0.003], [200.39, 203.4889538]),
     displayAngleDeg: 0,
+    imagery: map('io.ktx2', 98745),
   },
   {
     id: 'europa',
@@ -406,6 +466,7 @@ export const BODIES: readonly BodyData[] = [
     colour: 0xcfc2a8,
     rotation: spin([268.08, -0.009], [64.51, 0.003], [36.022, 101.3747235]),
     displayAngleDeg: 90,
+    imagery: map('europa.ktx2', 82432),
   },
   {
     id: 'ganymede',
@@ -420,6 +481,7 @@ export const BODIES: readonly BodyData[] = [
     colour: 0x9c9286,
     rotation: spin([268.2, -0.009], [64.57, 0.003], [44.064, 50.3176081]),
     displayAngleDeg: 180,
+    imagery: map('ganymede.ktx2', 89302),
   },
   {
     id: 'callisto',
@@ -434,6 +496,7 @@ export const BODIES: readonly BodyData[] = [
     colour: 0x6e655c,
     rotation: spin([268.72, -0.009], [64.83, 0.003], [259.51, 21.5710715]),
     displayAngleDeg: 270,
+    imagery: map('callisto.ktx2', 81628),
   },
   {
     id: 'titan',
@@ -450,6 +513,7 @@ export const BODIES: readonly BodyData[] = [
     colour: 0xd4a95a,
     rotation: spin([39.4827, 0], [83.4279, 0], [186.5855, 22.5769768]),
     displayAngleDeg: 45,
+    imagery: map('titan.ktx2', 69726),
   },
   {
     id: 'triton',
@@ -465,5 +529,6 @@ export const BODIES: readonly BodyData[] = [
     colour: 0xc9b8b2,
     rotation: spin([299.36, 0], [41.17, 0], [296.53, -61.2572637]),
     displayAngleDeg: 225,
+    imagery: map('triton.ktx2', 67067),
   },
 ];

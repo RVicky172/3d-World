@@ -2,6 +2,7 @@ import { FileLoader, LoaderUtils, type Object3D, type WebGLRenderer } from 'thre
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { configureKtx2 } from '../ktx2';
 
 /** Loads one model and reports download progress: 0–1, or null when the size is unknown (spec 011). */
 export interface ModelLoader {
@@ -18,24 +19,19 @@ export interface LoaderParts {
   meshoptDecoder: typeof MeshoptDecoder;
 }
 
-/** One model rarely has more than a few textures; each worker holds its own copy of the transcoder. */
-const TRANSCODER_WORKERS = 2;
-
 /**
  * glTF loader for the asset pipeline's output (spec 011): Meshopt geometry (`EXT_meshopt_compression`) and
  * KTX2 textures (`KHR_texture_basisu`), transcoded to whatever format this GPU supports.
  *
- * The transcoder path is left unset: three finds `basis_transcoder.js/.wasm` relative to its own module, and
- * Vite self-hosts both as build assets (011 T001). The file download and the transcoder start in parallel,
- * and the model is parsed only once both are ready. GLTFLoader swallows texture errors (it logs them and
- * renders untextured), so a transcoder failure must reject here, before parsing, to reach "Failed to load"
- * (AC-12).
+ * The transcoder setup is shared (`configureKtx2`, `src/shared/ktx2.ts`). The file download and the
+ * transcoder start in parallel, and the model is parsed only once both are ready. GLTFLoader swallows texture
+ * errors (it logs them and renders untextured), so a transcoder failure must reject here, before parsing, to
+ * reach "Failed to load" (AC-12).
  */
 export function createGltfLoader(renderer: WebGLRenderer, parts: LoaderParts = defaultParts()): ModelLoader {
   const { file, ktx2, gltf, meshoptDecoder } = parts;
   file.setResponseType('arraybuffer');
-  ktx2.setWorkerLimit(TRANSCODER_WORKERS);
-  ktx2.detectSupport(renderer);
+  configureKtx2(ktx2, renderer); // shared with standalone textures (022)
   gltf.setKTX2Loader(ktx2 as KTX2Loader);
   gltf.setMeshoptDecoder(meshoptDecoder);
 

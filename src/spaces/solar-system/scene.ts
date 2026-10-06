@@ -1,18 +1,35 @@
 import {
   AmbientLight,
+  DataTexture,
   Group,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
   PointLight,
+  Quaternion,
   SphereGeometry,
+  Vector3,
+  type Camera,
   type Object3D,
+  type Texture,
 } from 'three';
 import { disposeObject3D } from '../../shared/dispose';
 import { SOLAR_SYSTEM } from './data';
+import type { ImageryLayer } from './imagery';
+import {
+  createCloudLayer,
+  createEarthMaterial,
+  EARTH_NIGHT_INTENSITY,
+  patchRingShadow,
+  withImageFade,
+} from './materials';
 import { orientation, type Vector3Like } from './orbit';
+import { createRings, PLAIN_OPACITY, profileSpanU, type SaturnRings } from './rings';
 import { placeBodies } from './scale';
 import type { BodyData, BodyLayout } from './types';
+
+/** Sharper maps at grazing angles (plan: Three.js techniques). */
+const ANISOTROPY = 4;
 
 export interface SolarSystemScene {
   /** `system`: the Sun, its light, and one orbit group per planet. */
@@ -25,6 +42,16 @@ export interface SolarSystemScene {
   applyOrientations(days: number, speedDaysPerSecond: number): void;
   /** The body's mesh, by id. */
   mesh(id: string): Mesh;
+  /**
+   * Puts an arriving map on its body's layer (spec 022) and returns how to fade it in (0 → 1). Throws for a
+   * body or layer the scene doesn't have.
+   */
+  attach(id: string, layer: ImageryLayer, texture: Texture): (mix: number) => void;
+  /**
+   * Points the Sun-dependent shading at the Sun for this frame: Earth's night side (view space, so after the
+   * camera has moved) and Saturn's ring shadows (Saturn's frame, so after the bodies have moved).
+   */
+  updateSun(camera: Camera): void;
   dispose(): void;
 }
 
@@ -46,12 +73,49 @@ export function buildSystem(bodies: readonly BodyData[]): SolarSystemScene {
   const orbits = new Map<string, Group>();
   const parents = new Map(bodies.map((b) => [b.id, bodies.find((p) => p.id === b.parent)]));
 
+  const imageMix = new Map<string, { value: number }>();
+  let earth: { id: string; sunView: { value: Vector3 }; clouds: Mesh } | null = null;
+  let saturn: {
+    id: string;
+    rings: SaturnRings;
+    sunLocal: { value: Vector3 };
+    shadowProfile: { value: Texture };
+  } | null = null;
+  // Saturn's body shadow reads the ring profile's opacity; until it arrives, the plain band's.
+  const plainShadow = new DataTexture(new Uint8Array([255, 255, 255, Math.round(255 * PLAIN_OPACITY)]), 1, 1);
+  plainShadow.needsUpdate = true;
+
   for (const body of bodies) {
-    const material =
-      body.kind === 'star'
-        ? new MeshBasicMaterial({ color: body.colour }) // self-lit
-        : new MeshStandardMaterial({ color: body.colour, roughness: 1, metalness: 0 });
+    let material: MeshBasicMaterial | MeshStandardMaterial;
+    let sunView: { value: Vector3 } | null = null;
+    if (body.kind === 'star') {
+      material = new MeshBasicMaterial({ color: body.colour }); // self-lit
+      imageMix.set(body.id, withImageFade(material));
+    } else if (body.layers) {
+      const surface = createEarthMaterial(body.colour);
+      material = surface.material;
+      imageMix.set(body.id, surface.imageMix);
+      sunView = surface.sunView;
+    } else {
+      material = new MeshStandardMaterial({ color: body.colour, roughness: 1, metalness: 0 });
+      imageMix.set(body.id, withImageFade(material));
+    }
     const mesh = new Mesh(geometry, material);
+    if (sunView) earth = { id: body.id, sunView, clouds: createCloudLayer(mesh) };
+    if (body.rings) {
+      const shadow = patchRingShadow(material as MeshStandardMaterial, {
+        inner: body.rings.innerKm / body.radiusKm,
+        outer: body.rings.outerKm / body.radiusKm,
+        profile: plainShadow,
+        profileU: profileSpanU(body.rings),
+      });
+      saturn = {
+        id: body.id,
+        rings: createRings(body, mesh, shadow.sunLocal),
+        sunLocal: shadow.sunLocal,
+        shadowProfile: shadow.profile,
+      };
+    }
     mesh.name = body.id;
     meshes.set(body.id, mesh);
     if (!body.parent) {
@@ -78,6 +142,13 @@ export function buildSystem(bodies: readonly BodyData[]): SolarSystemScene {
     new PointLight(0xffffff, SOLAR_SYSTEM.light.sun, 0, 0),
     new AmbientLight(0xffffff, SOLAR_SYSTEM.light.ambient),
   );
+
+  const star = bodies.find((b) => b.kind === 'star');
+  if (!star) throw new Error('no Sun');
+  const sunMesh = meshes.get(star.id)!;
+  const sunWorld = new Vector3();
+  const planetWorld = new Vector3();
+  const inverse = new Quaternion();
 
   return {
     root,
@@ -106,8 +177,61 @@ export function buildSystem(bodies: readonly BodyData[]): SolarSystemScene {
       if (!mesh) throw new Error(`no body ${id}`);
       return mesh;
     },
+    attach(id, layer, texture) {
+      const mesh = meshes.get(id);
+      if (!mesh) throw new Error(`no body ${id}`);
+      const material = mesh.material as MeshStandardMaterial;
+      if (layer === 'surface') {
+        texture.anisotropy = ANISOTROPY;
+        material.map = texture;
+        material.needsUpdate = true;
+        const mix = imageMix.get(id)!;
+        return (value) => (mix.value = value);
+      }
+      if (layer === 'rings' && saturn?.id === id) {
+        saturn.rings.setProfile(texture);
+        saturn.shadowProfile.value = texture;
+        const mix = saturn.rings.imageMix;
+        return (value) => (mix.value = value);
+      }
+      if (earth?.id !== id) throw new Error(`${id} has no ${layer} layer`);
+      if (layer === 'clouds') {
+        const clouds = earth.clouds;
+        const cloudMaterial = clouds.material as MeshStandardMaterial;
+        cloudMaterial.alphaMap = texture;
+        cloudMaterial.needsUpdate = true;
+        clouds.visible = true;
+        return (value) => (cloudMaterial.opacity = value);
+      }
+      if (layer === 'night') {
+        material.emissiveMap = texture;
+        material.needsUpdate = true;
+        return (value) => (material.emissiveIntensity = EARTH_NIGHT_INTENSITY * value);
+      }
+      if (layer === 'ocean') {
+        material.roughnessMap = texture;
+        material.needsUpdate = true;
+        return () => {}; // a highlight's shape, nothing to fade from
+      }
+      throw new Error(`${id} has no ${layer} layer`);
+    },
+    updateSun(camera) {
+      const sun = sunMesh.getWorldPosition(sunWorld);
+      if (earth) earth.sunView.value.copy(sun).applyMatrix4(camera.matrixWorldInverse);
+      if (saturn) {
+        const planet = meshes.get(saturn.id)!;
+        planet.getWorldQuaternion(inverse).invert();
+        saturn.sunLocal.value
+          .copy(sun)
+          .sub(planet.getWorldPosition(planetWorld))
+          .applyQuaternion(inverse)
+          .normalize();
+      }
+    },
     dispose() {
-      disposeObject3D(root); // the shared sphere once, every material
+      saturn?.rings.dispose(); // its own material, placeholder and profile; the body's shadow shares the profile
+      plainShadow.dispose();
+      disposeObject3D(root); // the shared sphere once, every material and its maps, the clouds
     },
   };
 }

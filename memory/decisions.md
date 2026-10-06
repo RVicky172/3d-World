@@ -285,3 +285,45 @@ Format:
 **Decision (project lead):** AC-13's Space total is **≤ 4 MB including the shared decoder**; imagery and star data stay ≤ 3 MB. Source maps are **committed** at shipping resolution (~10 MB, JPEG q95) in `assets-src/solar-system/`. Plan approved.
 **Alternatives:** keep 3.5 MB and shrink the imagery to ~2.9 MB; commit only the fetch script.
 **Consequences:** Spec AC-13 amended (changelog). The repository grows by ~10 MB of source imagery.
+
+## D-031 — 022 imagery sources and treatment (2026-10-06)
+
+**Context:** 022 T001 source survey (table in `specs/features/022-solar-system-surfaces/tasks.md`).
+**Decision (project lead):**
+
+1. **Sources as surveyed:** public domain (NASA/USGS) for Mercury (PIA16298), Earth's day (Blue Marble NG), clouds and night (Black Marble 2016), Mars (Viking MDIM 2.1), Jupiter (PIA07782), the Galileans, Titan and Triton (USGS); Solar System Scope CC-BY 4.0 for the Sun, Venus (cloud tops), Saturn, its rings, Uranus, Neptune and Earth's ocean mask; the Moon from the USGS LRO mosaic, falling back to Solar System Scope if unreachable. Ring radii from the PDS Rings Node (C inner 74 490 km, A outer 136 780 km).
+2. **Greyscale maps** (Mercury, Europa, Callisto, Titan) are tinted by the body's 020 colour.
+3. **Titan:** its near-infrared surface map, tinted orange at low contrast.
+4. **Stars:** the Yale Bright Star Catalogue (5th rev., CDS V/50), credited to Hoffleit & Warren (1991), Yale University Observatory, via NASA ADC/CDS.
+
+**Alternatives:** the Moon from Solar System Scope; greyscale as published; Titan grey or haze only; an explicitly licensed catalogue.
+**Consequences:** The fetch script brings every map to 0° at the centre (rolling those centred on 180°; none needs mirroring, T004), tints greyscale ones, fills unmapped areas and records each convention; CREDITS.md lists every image.
+
+## D-032 — Background-content signal and block-aligned textures (2026-10-06)
+
+**Context:** 022 T051. Wiring the imagery made 021's time-speed E2E fail 2 of 3 full runs: under SwiftShader the
+textures' arrival (uploads, shader variants) makes frames exceed the 0.1 s delta clamp, so simulated time lags the
+wall clock in the second the test measures. Separately, the Saturn ring strip (published 1024 × 63) made
+KTX2Loader warn that block-compressed textures need sides in multiples of four.
+**Decision:** `SpaceManager` marks the status element `data-space-background="loading"` while the view reports
+background progress and `"done"` at 1 (cleared with the other status attributes). E2E waits on it
+(`waitForBackground`) before wall-clock measurements. The asset pipeline resizes a texture whose sides aren't
+multiples of four to the nearest that are (`blockAligned`), and `checkTextureOutput` rejects any that aren't.
+**Alternatives:** polling the GPU texture count until stable; widening the speed test's tolerance; fixing only
+the ring strip in the fetch script.
+**Consequences:** One more status attribute on `<body>` (additive, test-facing). The ring texture is 1024 × 64.
+T062 can wait on the same signal.
+
+## D-033 — AC-1's E2E check for near-featureless maps (2026-10-06)
+
+**Context:** 022 T060. Close up, Uranus's and Neptune's approved maps (T001: "near-featureless") show no more detail than a plain sphere (second-difference detail 0.39 vs 0.38 and 0.53 vs 0.45), though the imagery does change how they look (18.7 and 13.8 mean RGB from the plain colour). AC-1's E2E note asked every body to show surface detail.
+**Decision (project lead):** AC-1's E2E note is amended: every body must differ clearly from its plain colour at the same view, and the detail check applies to all but Uranus and Neptune.
+**Alternatives:** contrast-stretch or re-source the two maps so banding measures; drop the detail check for all bodies.
+**Consequences:** Spec changelog entry; `FEATURELESS` in `tests/e2e/solar-system-surfaces.spec.ts`.
+
+## D-034 — 022 AC-13's frame rate accepted on the software floor (2026-10-06)
+
+**Context:** 022 T091. With time running at 1280 × 720, SwiftShader (the E2E renderer; no compressed texture formats, so the maps are sampled uncompressed on the CPU) gives 56.5 fps (stylised) and 53.5 fps (real scale) at the whole-system views and 60.1 zoomed in. With the maps blocked it is 60.3 / 60.2 / 60.3, so the cost is texture sampling. 021 measured 60.2 on the same floor. No real-GPU measurement was available.
+**Decision (project lead):** accept the SwiftShader result as AC-13's frame-rate evidence and close 022.
+**Alternatives:** measure on a mid-range laptop first; optimise for the software floor (anisotropy 1, smaller distant maps); leave 022 open.
+**Consequences:** AC-13 ticked with this note; 022 Implemented. 030 (performance pass) is the place to revisit texture cost (e.g. anisotropy, LOD) and to measure on real hardware.

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createLoadingIndicator } from '../../../src/ui/loading';
 
@@ -210,5 +211,40 @@ describe('createLoadingIndicator (spec 010, AC-8)', () => {
     loading.dispose();
     expect(indicators()).toHaveLength(0);
     expect(container.contains(other)).toBe(true);
+  });
+
+  describe('background variant (spec 022, AC-11)', () => {
+    it('show(label, { background: true }) marks it compact and non-blocking, with the same announcements', () => {
+      const ui = createLoadingIndicator(container);
+      ui.show('Solar System imagery', { background: true });
+      const element = container.querySelector<HTMLElement>('.loading')!;
+      expect(element.classList.contains('is-background')).toBe(true);
+      expect(element.getAttribute('aria-live')).toBe('polite');
+      expect(element.textContent).toBe('Loading Solar System imagery…');
+      ui.progress(0.5);
+      expect(container.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('50');
+      ui.ready();
+      expect(container.querySelector('.loading-announcer')?.textContent).toBe('Solar System imagery loaded');
+    });
+
+    it('never blocks the view: the compact variant takes no pointer events (main.css)', () => {
+      const style = document.createElement('style');
+      style.textContent = readFileSync('src/styles/main.css', 'utf8');
+      document.head.append(style);
+      document.body.append(container);
+      const ui = createLoadingIndicator(container);
+      ui.show('Solar System imagery', { background: true });
+      expect(getComputedStyle(container.querySelector('.loading')!).pointerEvents).toBe('none');
+      ui.show('Space A');
+      expect(getComputedStyle(container.querySelector('.loading')!).pointerEvents).not.toBe('none');
+      style.remove();
+      container.remove();
+    });
+
+    it('a normal show() is not compact', () => {
+      const ui = createLoadingIndicator(container);
+      ui.show('Space A');
+      expect(container.querySelector('.loading')!.classList.contains('is-background')).toBe(false);
+    });
   });
 });

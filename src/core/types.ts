@@ -30,6 +30,13 @@ export interface SpaceContext {
    */
   reportProgress?(fraction: number | null): void;
   /**
+   * Progress of content still arriving after the view is ready (spec 022, AC-11): 0–1, null unknown, 1 = done.
+   * `what` names it for the indicator ("Solar System imagery"). Shown compactly after the usual delay, without
+   * blocking the view; reports made while the view opens are kept until it is ready; calls after the view is
+   * gone do nothing.
+   */
+  reportBackgroundProgress?(fraction: number | null, what: string): void;
+  /**
    * Wall-clock time of this open, ms since the Unix epoch (spec 021, Q1: the Solar System opens "today"). The
    * core reads the clock so Space logic never does (Constitution VI).
    */

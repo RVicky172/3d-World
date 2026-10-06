@@ -26,7 +26,8 @@ export type ViewName = 'gallery' | 'space';
 
 /** Shown while a view takes a while to load (spec 010, AC-8): the fader hides the view's own DOM meanwhile. */
 export interface LoadingIndicator {
-  show(label: string): void;
+  /** `background`: the compact, non-blocking variant for content arriving after the view is ready (022). */
+  show(label: string, options?: { background?: boolean }): void;
   /** Download progress, 0–1 or null (spec 011); only called while shown. */
   progress?(fraction: number | null): void;
   /** The view is ready after a shown indicator: announce it (spec 011, D-019). Falls back to `hide()`. */
@@ -43,7 +44,10 @@ export interface SpaceManagerOptions {
   /** Read for each view opened, so a mid-session preference change applies to the next view (spec 005, AC-10). */
   reducedMotion: () => boolean;
   registry?: readonly SpaceMeta[];
-  /** Receives `data-view`, `data-space-ready`, `data-space-id`, `data-space-status`. Defaults to `<body>`. */
+  /**
+   * Receives `data-view`, `data-space-ready`, `data-space-id`, `data-space-status` and `data-space-background`
+   * (022: "loading", then "done" once the view's background content has arrived). Defaults to `<body>`.
+   */
   statusElement?: HTMLElement;
   loading?: LoadingIndicator;
   loadingDelayMs?: number;
@@ -108,6 +112,20 @@ export class SpaceManager {
     shown: boolean;
     progress: number | null;
   } | null = null;
+  /**
+   * Content a ready view is still loading (spec 022, AC-11), for one request: its latest progress, whether the
+   * view is ready, the delay timer, and whether the compact indicator is showing.
+   */
+  private background: {
+    token: number;
+    label: string;
+    value: number | null;
+    ready: boolean;
+    timer: ReturnType<typeof setTimeout> | null;
+    shown: boolean;
+  } | null = null;
+  /** The request whose view last became ready (spec 022): its background progress may show at once. */
+  private readyToken = -1;
   private sequence = 0;
   /** False until the first view mounts: focus is never moved on the initial page view (AC-13). */
   private hasMounted = false;
@@ -151,6 +169,7 @@ export class SpaceManager {
     ++this.sequence;
     this.target = null;
     this.savedState = undefined;
+    this.stopBackground();
     this.stopLoading();
     this.clearStatus();
     delete this.status.dataset.view;
@@ -167,6 +186,7 @@ export class SpaceManager {
     ++this.sequence;
     // With nothing mounted (a loss mid-load), keep what the interrupted rebuild was carrying.
     if (this.mounted) this.savedState = saveStateOf(this.mounted);
+    this.stopBackground();
     this.stopLoading();
     this.clearStatus();
     clearMessage(this.engine.overlay);
@@ -189,6 +209,7 @@ export class SpaceManager {
     const token = ++this.sequence;
     this.target = { view, id, source };
     this.savedState = savedState;
+    this.stopBackground();
     const isStale = () => token !== this.sequence;
     const label = id ?? view;
     this.stopLoading(); // a newer request replaces any indication for an older one
@@ -230,6 +251,7 @@ export class SpaceManager {
       return this.fail('load-error', label, error);
     }
 
+    const title = id === null ? view : (findSpace(id, this.registry)?.title ?? id);
     const previousSpaceId = this.mounted?.id ?? null;
     this.unmount();
 
@@ -243,6 +265,8 @@ export class SpaceManager {
         reducedMotion: this.reducedMotion(),
         signal: controller.signal,
         reportProgress: (fraction) => this.reportProgress(token, fraction),
+        reportBackgroundProgress: (fraction, what) =>
+          this.reportBackground(token, `${title} ${what}`, fraction),
         startTime: this.wallClock(),
         ...(savedState === undefined ? {} : { savedState }),
       });
@@ -275,6 +299,7 @@ export class SpaceManager {
     if (id !== null) this.status.dataset.spaceId = id;
     this.status.dataset.spaceStatus = 'opened';
     this.status.dataset.spaceReady = 'true';
+    this.backgroundReady(token);
     return 'opened';
   }
 
@@ -338,6 +363,70 @@ export class SpaceManager {
     if (state.shown) this.loading.progress?.(fraction);
   }
 
+  /**
+   * Background progress from the view of request `token` (spec 022): kept until the view is ready, shown compactly
+   * after the loading delay, `1` hides it with a "loaded" announcement (silent if it never showed).
+   */
+  private reportBackground(token: number, label: string, fraction: number | null): void {
+    if (token !== this.sequence) return;
+    // For tests, as data-space-ready: wait for "done" before measuring anything frame-rate sensitive.
+    this.status.dataset.spaceBackground = fraction === 1 ? 'done' : 'loading';
+    if (!this.loading) return;
+    if (this.background?.token !== token) {
+      this.background = {
+        token,
+        label,
+        value: null,
+        ready: token === this.readyToken,
+        timer: null,
+        shown: false,
+      };
+    }
+    const state = this.background;
+    state.value = clampProgress(state.value, fraction);
+    if (state.value === 1) {
+      if (state.timer) clearTimeout(state.timer);
+      if (state.shown) {
+        if (this.loading.ready) this.loading.ready();
+        else this.loading.hide();
+      }
+      this.background = null;
+      return;
+    }
+    if (state.shown) this.loading.progress?.(fraction);
+    else this.scheduleBackground();
+  }
+
+  /** The view of request `token` is ready: pending background progress may now show. */
+  private backgroundReady(token: number): void {
+    this.readyToken = token;
+    if (this.background?.token !== token) return;
+    this.background.ready = true;
+    this.scheduleBackground();
+  }
+
+  private scheduleBackground(): void {
+    const state = this.background;
+    const loading = this.loading;
+    if (!state || !loading || !state.ready || state.timer || state.shown) return;
+    state.timer = setTimeout(() => {
+      if (this.background !== state) return;
+      state.timer = null;
+      state.shown = true;
+      loading.show(state.label, { background: true });
+      if (state.value !== null) loading.progress?.(state.value);
+    }, this.loadingDelayMs);
+  }
+
+  /** A new request, close() or a context loss: drop background progress and hide its indicator. */
+  private stopBackground(): void {
+    const state = this.background;
+    if (!state) return;
+    if (state.timer) clearTimeout(state.timer);
+    if (state.shown) this.loading?.hide();
+    this.background = null;
+  }
+
   /** Cancels the pending timer and hides the indicator; with `token`, only if it belongs to that request. */
   private stopLoading(token?: number): void {
     if (!this.loading) return;
@@ -351,6 +440,7 @@ export class SpaceManager {
     delete this.status.dataset.spaceReady;
     delete this.status.dataset.spaceId;
     delete this.status.dataset.spaceStatus;
+    delete this.status.dataset.spaceBackground;
   }
 }
 

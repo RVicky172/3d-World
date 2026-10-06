@@ -92,22 +92,36 @@ describe('stylised scale (AC-5)', () => {
     }
   });
 
-  it('shows every body at least 3 px in radius at the 1280 × 720 home view', () => {
+  it.each([
+    [1280, 720, 3],
+    [320, 640, 1],
+  ])('shows every body at least %i × %i: %i px in radius at the home view', (width, height, minPx) => {
     const { camera: view } = SOLAR_SYSTEM;
     const fovY = (view.fov * Math.PI) / 180;
     const extentAll = systemExtent(BODIES, styl);
-    const camera = new PerspectiveCamera(view.fov, 1280 / 720, 0.1, 1e4);
+    const camera = new PerspectiveCamera(view.fov, width / height, 0.1, 1e4);
     camera.position
       .set(...view.direction)
       .normalize()
-      .multiplyScalar(frameDistance(extentAll, fovY, 1280 / 720, view.fill));
+      .multiplyScalar(frameDistance(extentAll, fovY, width / height, view.fill));
     camera.lookAt(0, 0, 0);
     camera.updateMatrixWorld();
-    const pxPerUnitAt = (distance: number) => 720 / 2 / (distance * Math.tan(fovY / 2));
+    const pxPerUnitAt = (distance: number) => height / 2 / (distance * Math.tan(fovY / 2));
     for (const [id, world] of worldPositions(BODIES, styl)) {
       const distance = camera.position.distanceTo(new Vector3(...world));
-      expect(r(id) * pxPerUnitAt(distance), id).toBeGreaterThanOrEqual(3);
+      expect(r(id) * pxPerUnitAt(distance), id).toBeGreaterThanOrEqual(minPx);
     }
+  });
+
+  // Spec 022, AC-7: Saturn's rings take room at stylised scale too, so nothing passes through them.
+  it('counts Saturn’s rings in its extent: Titan’s ring clears them (2.349 × Saturn’s drawn radius)', () => {
+    const saturn = byId.get('saturn')!;
+    const ringOuter = (saturn.rings!.outerKm / saturn.radiusKm) * r('saturn');
+    expect(ringOuter / r('saturn')).toBeCloseTo(2.349, 3);
+    expect(d('titan') - r('titan')).toBeGreaterThan(ringOuter);
+    // …and Saturn's neighbours' rings clear them too.
+    expect(d('saturn') - ringOuter).toBeGreaterThan(d('jupiter') + extent(byId.get('jupiter')!));
+    expect(d('uranus') - extent(byId.get('uranus')!)).toBeGreaterThan(d('saturn') + ringOuter);
   });
 });
 

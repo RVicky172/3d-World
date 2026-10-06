@@ -11,6 +11,52 @@ Newest first. One entry per working session.
 
 ---
 
+## 2026-10-06 — 022-solar-system-surfaces (Implemented)
+
+**Done:**
+
+- 021 committed (`bf0d3e4`, not pushed). 022 spec drafted; Q1–Q9 answered (D-029); approved. Plan approved with AC-13 amended to Space ≤ 4 MB incl. the decoder and committed source maps (D-030); 26 tasks.
+- T001: source survey (NASA/USGS public domain first, Solar System Scope CC-BY for the Sun, Venus, Saturn + rings, Uranus, Neptune, Earth's ocean mask); approved with greyscale maps tinted by body colour, Titan tinted orange, the Yale BSC5 credited (D-031). NASA's hosts moved to `assets.science.nasa.gov`; NASA SVS and NSSDC unreachable from here.
+- T002: ETC1S q128 trial: Earth 264 KB, Jupiter 288, Saturn 130, Neptune 82, Uranus 7 (2K); clouds 92, Moon 91 (1K) → all imagery ≈ 2.4–2.6 MB. Ocean mask ETC1S, not UASTC.
+- T003: `KTX2Loader` in the chunk: entry +0.0 KB; Space 17.3 → 40.6 KB code + 571 KB decoder → projected ~3.1 MB total.
+
+- T004: `scripts/solar-imagery.mjs` (14 tests) + `fetch-solar-imagery.mjs`: 20 maps in `assets-src/solar-system/` (5.4 MB), one convention, tints, Titan contrast, no-data fill; CREDITS section. 780 unit green.
+
+- T005: `scripts/star-catalogue.mjs` (8 tests) + `build-star-catalogue.mjs`: 9 096 stars → `stars.bin` 53.3 KB; credit. 788 unit green.
+
+- T010: pipeline texture entries (`TextureEntry`, `checkTextureOutput`), `npm run assets` → 20 KTX2 maps, 2.40 MB (+ stars = 2.45 MB); per-Space budget `solar-system` ≤ 4 MB in the bundle check. 799 unit green; build OK.
+
+- T011: `src/shared/ktx2.ts` (`configureKtx2`, `createKtx2`) shared by the model viewer and the Solar System. 806 unit + 159 E2E green.
+
+- T020: imagery data on every body, Earth layers, Saturn rings in km (1.279–2.349 × the drawn mean radius, not the plan's equatorial 1.239–2.270), `SKY.stars`, sources; 811 unit green.
+
+- T021: `surfaces.ts` (`longitudeOfU`, `subPoint`), 10 tests; found and fixed a 021 bug (Earth's spin 180° off before 2000: node from the pole vector; now α₀ + 90°). 821 unit + 159 E2E green.
+
+- T022–T024: `ring-shadows.ts`, `stars.ts` (decode, directions, size/alpha, B−V colour), `nightFactor`, `glowSize`; 20 tests, sabotage-checked where written alongside.
+
+- T025: ring-aware stylised layout (Titan clears Saturn's rings; extent 57.1 → 61.8; no retune). 843 unit + 159 E2E green.
+
+- T030: core `reportBackgroundProgress` + compact indicator variant (`.loading.is-background`); 10 tests. 852 unit + 159 E2E green.
+
+- T040–T042: `materials.ts` (patches with anchor checks, image fade, Earth ocean/night, clouds, Saturn ring-shadow patch), `rings.ts` (fixed: plain band colour was sRGB in a linear uniform), `createStarfield` (xyww at infinity) and `createGlow` (additive sprite, generated falloff). 875 unit + 159 E2E green. Not yet wired into the Space (T050/T051).
+
+- T043: `imagery.ts` (`imageryJobs`, `loadImagery`: byte progress, failures kept coloured with one warning, abort disposes late arrivals, loader freed when settled; `createFader`). 887 unit + 159 E2E green.
+
+- T050–T051: Space tests (11, via `createKtx2`/`loadStars`/`baseUrl` seams) and wiring (`scene.attach`/`updateSun`, imagery + stars after open, glow, fader, ring-aware near plane, ordered dispose). Screenshots checked (surfaces, terminator, city lights, ocean glint, Saturn 2025/2032 shadows, stars, glow). Fixed: ring strip 1024 × 63 → pipeline block alignment; 021 speed E2E straddling imagery arrival → `data-space-background` signal (D-032). 902 unit + 159 E2E (3 runs); entry 147.9 KB; Space 3.06 MB.
+
+- T060: `solar-system-surfaces.spec.ts`, 9 E2E tests for AC-1–AC-6 by paired pages (one with maps 404ing) on one pose; AC-2 by lighting-free ratio images. AC-1's detail check excludes Uranus/Neptune (featureless maps; lead approved, D-033). 902 unit + 168 E2E.
+
+- T061: 5 E2E tests (rings + both shadows by tracing pixels in Saturn's frame; stars at infinity and under bodies by pages with/without `stars.bin`; glow halo at both scales, never over the Sun's disc). Fixed: paired pages now share a fixed date; 021's speed test measures Space time (clamped deltas). 902 unit + 173 E2E, 3/3 full runs.
+
+- T062: 4 E2E tests (held Jupiter map: usable, compact indicator, coloured then textured; 404: stays coloured, one warning; 10 round trips incl. one mid-load back to DOM/GPU/worker baseline; context loss keeps time state and imagery). Sabotage-checked. 902 unit + 177 E2E, 2/2 full runs. E2E section complete.
+
+- T090–T091 (`/spec-verify 022`): docs updated; 902 unit + 177 E2E + build green; entry 147.9 KB; Space 3.06 MB; production gate-5 probe clean. AC-1–AC-12 ticked. AC-13 open: SwiftShader 53.5–56.5 fps at whole-system views (60.3 with the maps blocked: software texture sampling); 60 FPS on a mid-range laptop not yet measured. Spec stays In Progress; roadmap 🚧.
+
+- T092: AC-13 accepted on the SwiftShader floor by the lead (D-034); 13/13 ACs ticked; spec Implemented; roadmap 022 ✔️.
+
+**Next:** commit 022 when the lead asks; then `/spec-new` for 023 (selection & focus).
+**Blockers:** none
+
 ## 2026-10-06 — 021-orbital-mechanics ✔️ Implemented
 
 **Done:**

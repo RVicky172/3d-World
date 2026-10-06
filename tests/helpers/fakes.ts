@@ -51,12 +51,13 @@ export function createFakeRenderer() {
 export function createFakeContext(overrides: Partial<SpaceContext> = {}): SpaceContext {
   const canvas = document.createElement('canvas');
   return {
-    renderer: { domElement: canvas } as unknown as WebGLRenderer,
+    renderer: { domElement: canvas, getPixelRatio: () => 1 } as unknown as WebGLRenderer,
     canvas,
     overlay: document.createElement('div'),
     reducedMotion: false,
     signal: new AbortController().signal,
     startTime: Date.UTC(2026, 9, 5), // fixed "today" (spec 021)
+    reportBackgroundProgress: () => {}, // spec 022
     ...overrides,
   };
 }

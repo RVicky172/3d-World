@@ -1,6 +1,7 @@
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { BODIES, SOURCES } from '../../../../src/spaces/solar-system/data';
-import type { BodyData } from '../../../../src/spaces/solar-system/types';
+import { BODIES, SKY, SOURCES } from '../../../../src/spaces/solar-system/data';
+import type { BodyData, Imagery } from '../../../../src/spaces/solar-system/types';
 
 // Spec 020, AC-1–AC-4: the Sun, the eight planets and the seven major moons as sourced, consistent data.
 
@@ -127,7 +128,15 @@ describe('plausibility (AC-3)', () => {
 describe('sources (AC-4)', () => {
   it('names a source with URL, licence and date read for each kind of data', () => {
     const covered = new Set(SOURCES.flatMap((s) => s.covers));
-    expect([...covered].sort()).toEqual(['moon-orbits', 'physical', 'planet-orbits', 'rotation']);
+    expect([...covered].sort()).toEqual([
+      'imagery',
+      'moon-orbits',
+      'physical',
+      'planet-orbits',
+      'rings',
+      'rotation',
+      'stars',
+    ]);
     for (const source of SOURCES) {
       expect(source.name.trim()).not.toBe('');
       expect(source.url).toMatch(/^https:\/\//);
@@ -207,5 +216,52 @@ describe('motion data for 021 (D-025)', () => {
       const normal = [Math.sin(i) * Math.sin(node), -Math.sin(i) * Math.cos(node), Math.cos(i)];
       expect(Math.abs(angle(axis, normal) - b.axialTiltDeg), b.id).toBeLessThan(1);
     }
+  });
+});
+
+// Spec 022, AC-1, AC-7, AC-13 (D-029–D-031): every body's imagery, Earth's layers, Saturn's rings and the sky.
+describe('imagery (022)', () => {
+  const credits = readFileSync('public/assets/CREDITS.md', 'utf8');
+  const file = (image: { file: string }) => `public/assets/solar-system/${image.file}`;
+  const all: Imagery[] = [
+    ...BODIES.map((b) => b.imagery),
+    ...Object.values(body('earth').layers ?? {}),
+    ...(body('saturn').rings ? [body('saturn').rings!.profile] : []),
+  ];
+
+  it('gives every body a map, at 0° longitude in the centre (the fetch script’s convention)', () => {
+    for (const b of BODIES) {
+      expect(b.imagery.file, b.id).toBe(`${b.id}.ktx2`);
+      expect(b.imagery.leftEdgeLongitudeDeg, b.id).toBe(-180);
+    }
+  });
+
+  it('gives Earth clouds, night lights and an ocean mask, and no other body layers', () => {
+    expect(Object.keys(body('earth').layers ?? {}).sort()).toEqual(['clouds', 'night', 'ocean']);
+    expect(body('earth').layers!.clouds.file).toBe('earth-clouds.ktx2');
+    expect(BODIES.filter((b) => b.layers).map((b) => b.id)).toEqual(['earth']);
+  });
+
+  it('every file exists, its recorded size matches, and it has a credit line', () => {
+    for (const image of [...all, SKY.stars]) {
+      expect(existsSync(file(image)), image.file).toBe(true);
+      expect(statSync(file(image)).size, image.file).toBe(image.bytes);
+      expect(credits, image.file).toContain(`assets/solar-system/${image.file}`);
+    }
+  });
+
+  it('imagery and stars together fit 3 MB (AC-13, D-029)', () => {
+    const total = [...all, SKY.stars].reduce((sum, image) => sum + image.bytes, 0);
+    expect(total).toBeLessThanOrEqual(3 * 1024 * 1024);
+  });
+
+  it('only Saturn has rings: the C ring’s inner edge to the A ring’s outer edge, outside the planet (AC-7)', () => {
+    expect(BODIES.filter((b) => b.rings).map((b) => b.id)).toEqual(['saturn']);
+    const { innerKm, outerKm, profile } = body('saturn').rings!;
+    expect(innerKm).toBe(74_490); // PDS Rings Node
+    expect(outerKm).toBe(136_780);
+    expect(innerKm).toBeGreaterThan(body('saturn').radiusKm);
+    expect(outerKm).toBeLessThan(body('titan').orbit!.semiMajorAxisKm);
+    expect(profile.file).toBe('saturn-rings.ktx2');
   });
 });

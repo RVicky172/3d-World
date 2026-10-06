@@ -129,10 +129,18 @@ function spaceFiles(manifest, source, entry) {
  *   readFile: (file: string) => string | Uint8Array;
  *   assetBytes: (spaceId: string) => number;
  *   budgetBytes: number;
- * }} input
- * @returns {{ errors: string[]; sizes: { id: string; codeGzipBytes: number; assetBytes: number; emittedBytes: number; totalBytes: number }[] }}
+ *   budgetFor?: Record<string, number>;
+ * }} input `budgetFor` sets a Space's own budget (e.g. 022 D-030: the Solar System ≤ 4 MB)
+ * @returns {{ errors: string[]; sizes: { id: string; codeGzipBytes: number; assetBytes: number; emittedBytes: number; totalBytes: number; budgetBytes: number }[] }}
  */
-export function checkSpaceBudgets({ manifest, spaceSources, readFile, assetBytes, budgetBytes }) {
+export function checkSpaceBudgets({
+  manifest,
+  spaceSources,
+  readFile,
+  assetBytes,
+  budgetBytes,
+  budgetFor = {},
+}) {
   const entry = new Set(entryFiles(manifest));
   const mb = (/** @type {number} */ bytes) => (bytes / 1024 / 1024).toFixed(1);
   const size = (/** @type {number} */ bytes) =>
@@ -148,11 +156,12 @@ export function checkSpaceBudgets({ manifest, spaceSources, readFile, assetBytes
     const emittedBytes = emitted.reduce((sum, file) => sum + readFile(file).length, 0);
     const assets = assetBytes(id);
     const totalBytes = codeGzipBytes + assets + emittedBytes;
-    sizes.push({ id, codeGzipBytes, assetBytes: assets, emittedBytes, totalBytes });
-    if (totalBytes > budgetBytes) {
+    const budget = budgetFor[id] ?? budgetBytes;
+    sizes.push({ id, codeGzipBytes, assetBytes: assets, emittedBytes, totalBytes, budgetBytes: budget });
+    if (totalBytes > budget) {
       errors.push(
         `Space ${id} is ${mb(totalBytes)} MB (code ${size(codeGzipBytes)} + assets ${size(assets)} + ` +
-          `emitted files ${size(emittedBytes)}), over the ${mb(budgetBytes).replace(/\.0$/, '')} MB budget (Constitution IV).`,
+          `emitted files ${size(emittedBytes)}), over the ${mb(budget).replace(/\.0$/, '')} MB budget (Constitution IV).`,
       );
     }
   }

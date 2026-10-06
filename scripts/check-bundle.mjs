@@ -7,6 +7,8 @@ import { checkBundle, checkSpaceBudgets } from './bundle-checks.mjs';
 const DIST = 'dist';
 const ENTRY_BUDGET_BYTES = 250 * 1024; // Constitution IV
 const SPACE_BUDGET_BYTES = 5 * 1024 * 1024; // Constitution IV: each Space's code + assets + emitted decoders
+/** Tighter budgets a spec sets for one Space. */
+const SPACE_BUDGETS = { 'solar-system': 4 * 1024 * 1024 }; // 022 AC-13, D-030
 
 const manifest = JSON.parse(readFileSync(join(DIST, '.vite', 'manifest.json'), 'utf8'));
 const spaceSources = readdirSync('src/spaces', { withFileTypes: true })
@@ -40,6 +42,7 @@ const budgets = checkSpaceBudgets({
   readFile: (file) => readFileSync(join(DIST, file)),
   assetBytes: (id) => folderBytes(join('public', 'assets', id)),
   budgetBytes: SPACE_BUDGET_BYTES,
+  budgetFor: SPACE_BUDGETS,
 });
 errors.push(...budgets.errors);
 
@@ -47,10 +50,10 @@ console.log(
   `Bundle check: entry ${(entryGzipBytes / 1024).toFixed(1)} KB gzipped (budget ${ENTRY_BUDGET_BYTES / 1024} KB), ` +
     `${spaceSources.length} lazy Space chunk(s).`,
 );
-for (const { id, codeGzipBytes, assetBytes, emittedBytes, totalBytes } of budgets.sizes) {
+for (const { id, codeGzipBytes, assetBytes, emittedBytes, totalBytes, budgetBytes } of budgets.sizes) {
   console.log(
     `  Space ${id}: code ${(codeGzipBytes / 1024).toFixed(1)} KB gzipped + assets ${(assetBytes / 1024 / 1024).toFixed(2)} MB` +
-      ` + decoders ${(emittedBytes / 1024).toFixed(1)} KB = ${(totalBytes / 1024 / 1024).toFixed(2)} MB (budget ${SPACE_BUDGET_BYTES / 1024 / 1024} MB)`,
+      ` + decoders ${(emittedBytes / 1024).toFixed(1)} KB = ${(totalBytes / 1024 / 1024).toFixed(2)} MB (budget ${budgetBytes / 1024 / 1024} MB)`,
   );
 }
 if (errors.length > 0) {

@@ -3,7 +3,8 @@ import { PerspectiveCamera, Quaternion, Vector3 } from 'three';
 import { BODIES, REAL_UNIT_KM } from '../../src/spaces/solar-system/data';
 import { planetPosition, toScene } from '../../src/spaces/solar-system/orbit';
 import { layout } from '../../src/spaces/solar-system/scale';
-import { canvasRgba, expect, gotoSpace, test } from './fixtures';
+import { MAX_DELTA_SECONDS } from '../../src/core/clock';
+import { canvasRgba, expect, gotoSpace, test, waitForBackground } from './fixtures';
 
 // Spec 021 — time controls (T040): AC-6 (play/pause, speed, direction by mouse, touch and keyboard), AC-7 (the
 // date), AC-8 (opens today; range limits), AC-9 (reduced motion). Motion (T041): AC-4 (spin), AC-10 (markers and
@@ -22,19 +23,43 @@ const announcer = (page: Page) => group(page).locator('[aria-live="polite"]');
 const simTime = (page: Page) => page.evaluate(() => window.__WORLD__!.simTime()!);
 const focusedClass = (page: Page) => page.evaluate(() => document.activeElement?.className ?? '');
 
-/** Simulated days per real second, measured over ~1 s of the page's own clock. */
+/** Opens the Space and waits for its imagery (022), whose arrival slows the first frames under SwiftShader. */
+async function openSettled(page: Page): Promise<void> {
+  await gotoSpace(page, ID);
+  await waitForBackground(page);
+}
+
+/**
+ * Simulated days per second of Space time, over ~1 s of it. Space time is the frames' time with each step clamped
+ * as the engine clamps it (`MAX_DELTA_SECONDS`), so the rate holds when a loaded machine renders under 10 fps,
+ * where wall-clock time would run ahead of the app by design (022 T061).
+ */
 async function measuredSpeed(page: Page): Promise<number> {
-  const [d0, t0] = await page.evaluate(() => [window.__WORLD__!.simTime()!.days, performance.now()]);
-  await page.waitForTimeout(1000);
-  const [d1, t1] = await page.evaluate(() => [window.__WORLD__!.simTime()!.days, performance.now()]);
-  return (d1 - d0) / ((t1 - t0) / 1000);
+  return page.evaluate(
+    (maxDelta) =>
+      new Promise<number>((resolve) => {
+        let start: number | null = null;
+        let last: number | null = null;
+        let spaceSeconds = 0;
+        const tick = (now: number) => {
+          const days = window.__WORLD__!.simTime()!.days;
+          if (last !== null) spaceSeconds += Math.min(Math.max((now - last) / 1000, 0), maxDelta);
+          start ??= days;
+          last = now;
+          if (spaceSeconds >= 1) resolve((days - start) / spaceSeconds);
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    MAX_DELTA_SECONDS,
+  );
 }
 
 test.describe('time controls (AC-6, AC-7)', () => {
   test('mouse: pause, play, choose a speed and run backwards; each change is announced and keeps focus', async ({
     page,
   }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     await expect(playButton(page)).toHaveText('Pause time');
     expect(await measuredSpeed(page)).toBeCloseTo(7, -0.5); // 1 week per second by default (± ~1.5 d/s)
 
@@ -57,7 +82,7 @@ test.describe('time controls (AC-6, AC-7)', () => {
   });
 
   test('keyboard: Tab reaches the controls; Enter, Space and arrow keys work them', async ({ page }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     await playButton(page).focus();
     await page.keyboard.press('Enter');
     await expect(playButton(page)).toHaveText('Play time');
@@ -78,7 +103,7 @@ test.describe('time controls (AC-6, AC-7)', () => {
   });
 
   test('the date is shown as <time datetime>, not announced, and advances', async ({ page }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     const date = group(page).locator('time');
     await expect(date).toBeVisible();
     expect(await date.evaluate((el) => el.closest('[aria-live]'))).toBeNull();
@@ -98,7 +123,7 @@ test.describe('touch (AC-6)', () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 375, height: 667 } });
 
   test('a tap works play/pause and the direction toggle', async ({ page }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     await playButton(page).tap();
     await expect(playButton(page)).toHaveText('Play time');
     await backwards(page).tap();
@@ -111,7 +136,7 @@ test.describe('touch (AC-6)', () => {
 
 test.describe('start and range (AC-8)', () => {
   test('opens at today’s date, by the page’s own clock', async ({ page }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     const [{ days }, now] = await Promise.all([simTime(page), page.evaluate(() => Date.now())]);
     const today = (now - J2000_MS) / DAY_MS;
     // Time has run 1 week per second since opening: a few seconds at most.
@@ -120,7 +145,7 @@ test.describe('start and range (AC-8)', () => {
   });
 
   test('playing into 2050 pauses there and says so', async ({ page }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     const end = (Date.UTC(2050, 11, 31) - J2000_MS) / DAY_MS;
     await speed(page).selectOption('year');
     await page.evaluate((d) => window.__WORLD__!.setSimTime(d), end - 30);
@@ -135,7 +160,7 @@ test.describe('reduced motion (AC-9)', () => {
   test.use({ reducedMotion: 'reduce' });
 
   test('time starts paused; Play starts it', async ({ page }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     await expect(playButton(page)).toHaveText('Play time');
     expect(await measuredSpeed(page)).toBe(0);
     await playButton(page).click();
@@ -203,7 +228,7 @@ test.describe('motion (AC-4, AC-10)', () => {
   test('AC-4: bodies turn with time at a slow speed, and hold still above one turn per second', async ({
     page,
   }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     await speed(page).selectOption('day'); // Mercury turns ~6° a day: 0.017 turns per second
     await frames(page);
     const before = await snapshot(page);
@@ -224,7 +249,7 @@ test.describe('motion (AC-4, AC-10)', () => {
   });
 
   test('AC-10: real-scale markers stay on their moving bodies (within 4 px)', async ({ page }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     await toggle(page).click();
     await speed(page).selectOption('year'); // Mercury goes round ~4 times a second
     for (let i = 0; i < 5; i++) {
@@ -241,7 +266,7 @@ test.describe('motion (AC-4, AC-10)', () => {
   test('AC-10: re-centred on Earth, the view follows it while time runs; a pan stops following', async ({
     page,
   }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     await toggle(page).click();
     await speed(page).selectOption('month');
     await frames(page);
@@ -317,7 +342,7 @@ test.describe('orbit lines (AC-11), with reduced motion', () => {
   }
 
   test('a faint line traces Neptune’s path at both scales', async ({ page }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     expect(await neptunePathDrawn(page, 'stylised')).toBeGreaterThan(0.9);
     await toggle(page).click();
     expect(await neptunePathDrawn(page, 'real')).toBeGreaterThan(0.9);
@@ -338,7 +363,7 @@ test.describe('lifecycle (AC-12)', () => {
   };
 
   test('a context loss and restore keeps the date, speed, direction and paused state', async ({ page }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     await speed(page).selectOption('month');
     await backwards(page).click();
     await playButton(page).click(); // pause
@@ -355,7 +380,7 @@ test.describe('lifecycle (AC-12)', () => {
   });
 
   test('a context loss while playing comes back playing, from where it was', async ({ page }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     await speed(page).selectOption('day');
     await page.evaluate(() => window.__WORLD__!.setSimTime(9000));
     await loseAndRestore(page);
@@ -368,7 +393,7 @@ test.describe('lifecycle (AC-12)', () => {
   test('a fresh visit starts at today, 1 week per second, whatever the last one did (Q8)', async ({
     page,
   }) => {
-    await gotoSpace(page, ID);
+    await openSettled(page);
     await speed(page).selectOption('year');
     await backwards(page).click();
     await page.evaluate(() => window.__WORLD__!.setSimTime(0));

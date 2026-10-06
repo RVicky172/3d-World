@@ -103,6 +103,17 @@ function equatorialPole(body: BodyData, days: number, out: Vector3Like): Vector3
   return out;
 }
 
+/**
+ * The ascending node of a body's equator on the J2000 equator, the origin of its prime meridian angle W: by the IAU
+ * definition at right ascension α₀ + 90° (unit, J2000 equatorial). Not derived from the pole vector: Earth's linear
+ * pole model passes Dec 90° at J2000 (Dec = 90° − 0.557°·T), and the vector's x/y flip before it, which turned
+ * Earth's spin phase 180° for every date before 2000 (found in 022 T021).
+ */
+function equatorNode(body: BodyData, days: number, out: Vector3Like): Vector3Like {
+  const ra = (body.rotation.poleRaDeg[0] + body.rotation.poleRaDeg[1] * (days / DAYS_PER_CENTURY)) * RAD;
+  return set(out, -Math.sin(ra), Math.cos(ra), 0);
+}
+
 /** A planet's elements on a date: J2000 values plus rates (JPL Table 1). */
 function planetElement(
   orbit: OrbitalElements,
@@ -198,8 +209,7 @@ function setMoonBasis(moon: BodyData, planet: BodyData, days: number): void {
   if (orbit.plane === 'laplace') {
     // Frame of the planet's equator: x at its ascending node on the J2000 equator, z along the pole.
     equatorialPole(planet, days, pole);
-    const len = Math.hypot(pole.x, pole.y);
-    set(node, -pole.y / len, pole.x / len, 0);
+    equatorNode(planet, days, node);
     set(
       plane,
       pole.y * node.z - pole.z * node.y,
@@ -261,8 +271,7 @@ export function orientation(
     const W = (turnsPerSecond > 1 ? W0 : W0 + rate * days) * RAD;
     // The prime meridian is W east of the equator's ascending node on the J2000 equator.
     equatorialPole(body, days, axisY);
-    const len = Math.hypot(axisY.x, axisY.y);
-    set(scratch, -axisY.y / len, axisY.x / len, 0);
+    equatorNode(body, days, scratch);
     cross(axisY, scratch, axisZ); // east of the node
     set(
       axisX,

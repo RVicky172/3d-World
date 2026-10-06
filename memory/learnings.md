@@ -5,6 +5,9 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 ## Three.js
 
 - Disposing a mesh does not dispose its material's textures — traverse materials and dispose each texture map explicitly. `disposeObject3D` (src/shared/dispose.ts) handles this, plus `ShaderMaterial` uniform textures and `scene.background`/`environment`.
+- **`ShaderMaterial` colour uniforms aren't colour-managed:** a hex split into 0–1 bytes is sRGB, but the shader treats it as linear and `#include <colorspace_fragment>` converts it again (washed out). Pass `new Color(hex)`, which converts sRGB → linear working space, so it matches sRGB textures sampled in the same shader (022 T041).
+
+- **Block-compressed textures (ETC1S/UASTC) need sides in multiples of four.** Otherwise KTX2Loader warns ("should use multiple-of-four dimensions") and some GPUs may refuse the compressed upload. A 1024 × 63 strip slipped through until the warning showed in a real browser; the pipeline now aligns and checks it (022 T051, D-032).
 
 ## Three.js — renderer-owned resources
 
@@ -41,6 +44,7 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 ## Assets & licences
 
 - **NASA's NSSDC fact sheets (`nssdc.gsfc.nasa.gov`) were unreachable** on 2026-10-05: connection refused from both WebFetch and curl, and web.archive.org is blocked for WebFetch. JPL covers the same data: the **Horizons API** (`ssd.jpl.nasa.gov/api/horizons.api?format=text&COMMAND='499'&OBJ_DATA='YES'&MAKE_EPHEM='NO'`) returns each body's radius, GM, rotation and obliquity as plain text via curl. Body codes: 10 Sun, `n99` planets, 301 Moon, 501–504 Galileans, 606 Titan, 801 Triton.
+- **Build a body's prime-meridian node from α₀ + 90°, never from the pole vector.** NAIF's linear Earth pole (Dec = 90° − 0.557°·T) crosses 90° at J2000; before 2000 the vector's x/y flip, so a node derived as ẑ × pole turned 180° and Earth's spin phase with it, for every pre-2000 date. Uniform 021 spheres hid it; 022's sub-solar test at 1850 caught it (T021).
 - **NAIF PCK "periodic" terms aren't always small.** WGCCRE 2015's Mars pole has a ~71 000-year term of 1.59° in Dec (0.42° in RA); dropping it put Mars's tilt 1.3° off. The Moon (3.9° in RA) and Triton (32°) have big terms too. Fold slow terms in at J2000, or derive the axis another way. A cross-check of pole-derived tilt against Horizons' obliquity caught it (021 T010).
 - **Horizons vector tables:** `EPHEM_TYPE='VECTORS'`, `TLIST='<JD …>'` gives many dates in one request. Its ephemerides have start dates: no Neptune before **1800-01-02** (a reply with no `$$SOE`, just "No ephemeris … prior to …"). `scripts/horizons.mjs` fails loudly on that (021 T002).
 - **JPL's satellite mean-elements table (`sats/elem/sep.html`) can't be propagated for centuries as-is** (021 T013). Its `P` is not the mean-longitude rate for every moon: Io's 1.762732 d gives 204.23°/d against the true 203.49°/d (NAIF's synchronous Ẇ), so Io is ~90° off by 2025. Titan's row is ~160° out of phase with Horizons at J2000 (osculating M 163.4° vs the table's 11.7°). Triton (retrograde, fast node precession) needs its node to _advance_ (Ω̇ ∝ −cos i) and still lands up to 25° off. Also: on a near-ecliptic orbit, a `cos i` factor on the node term (Ω̇ cos i instead of Ω̇) put the Moon 14° off by 1800: keep the dogleg mean longitude Ω + ω + M. Check moon elements against Horizons vectors at several dates before trusting them.
@@ -57,6 +61,13 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - `canvasCoverage` (share of non-background pixels) is low for sparse silhouettes (~6 % for the chair) even when framing is right. Use bounds, not coverage, to judge framing.
 - The same over-estimate hits the **zoom-out limit**: at the 10 % sphere floor the chair outline is ~7 % (D-016). Any limit or framing rule stated in pixels needs a pixel check, not just the maths.
 - OrbitControls `update()` with no delta adds a 60 fps `autoRotate` step. `setHome()` switches auto-rotate off for its one update, so re-framing doesn't jump the turntable.
+
+## Planetary imagery (022)
+
+- **NASA's image hosts moved** to `assets.science.nasa.gov` (Photojournal: `/content/dam/science/psd/photojournal/pia/piaNN/piaNNNNN/PIANNNNN.jpg`; the `dynamicimage` resizer refuses TLS from here). `eoimages.gsfc.nasa.gov` still serves Visible Earth files. NASA SVS and NSSDC don't respond. The host is flaky: retry with back-off.
+- **Solar System Scope answers HEAD requests with HTML**, but GET returns the image: check content-type on the GET.
+- **A USGS mosaic's layout is in its GeoTIFF header**, readable from the first few MB with `curl -L -r` (a plain range request without `-L` gets a redirect stub; Python's default user agent gets 403). Central meridian = the second GeoKey double; the tie-point gives the left edge. "Positive west" in USGS metadata only labels longitudes: the pixels still run east to the right; only the centre (0° or 180°) differs. The 1024 px sample JPGs share the source's layout.
+- **Mosaics mark unmapped areas pure black**, which renders as holes on a sphere; fill them before encoding (022 T004).
 
 ## Testing
 
@@ -88,6 +99,17 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - **"GPU stall due to ReadPixels" warnings are environmental.** Probes launched without the E2E flags use the real NVIDIA GPU, whose driver logs 4 of them on the first page a fresh browser opens. That happens in 011's build too, and never under SwiftShader (`--use-angle=swiftshader`, as `playwright.config.ts` launches). When checking DoD gate 5 with a probe, launch with the E2E flags (012 T092).
 - **Check which GPU a probe really used before trusting FPS.** On 2026-10-05 a probe launched without SwiftShader flags still reported `UNMASKED_RENDERER_WEBGL` = SwiftShader (while an earlier no-flag probe logged NVIDIA driver messages). Log the renderer string next to any FPS figure (020 T091).
 - Headless Chromium renders WebGL via SwiftShader (software). It's slow, so E2E scenes should allow a `?quality=low` mode; don't assert on FPS in CI.
+
+- **Background loading skews wall-clock E2E measurements under SwiftShader.** Texture uploads and shader recompiles as imagery arrives make frames exceed the engine's 0.1 s delta clamp, so simulated time runs ~25 % slow for that second (021's speed test failed 2 of 3 full runs). Wait for `body[data-space-background="done"]` (`waitForBackground`) before measuring (022 T051).
+- **Close-up screenshots of a Solar System body:** at stylised scale the wheel zooms towards the orbit target (the Sun), not the cursor; only real scale re-centres on a body (D-023). Project the body with `cameraPose`/`cameraProjection` and wheel at it at real scale, stopping at the wanted on-screen radius (022 T051).
+
+- **Comparing two pages on one camera pose isolates a texture's effect.** The re-centring zoom is deterministic: two pages fed the same wheel sequence land on the same pose (relative gap ≤ 2e-7). Make one page answer 404 for a map (`page.route`) and diff the renders: lighting, framing and date cancel. Textured ÷ plain luminance gives a lighting-free albedo image (the ambient term scales with albedo too), which is what motion checks need; patch matching on raw frames was fooled by a fixed terminator and by shading that changes as the surface turns (022 T060).
+- **Playwright's "webServer … Exit code: 2" can be a type error in a spec:** `build:test` starts with `tsc --noEmit`, which covers `tests/`. Run `npx tsc --noEmit -p .` first (022 T060).
+
+- **Paired pages must share a fixed date.** The Solar System opens at "today" by the wall clock, so two pages opened seconds apart under load differ by Earth's spin (360°/day): enough to fail an exact disc comparison. Set the same date in both (`setSimTime`) before comparing (022 T061).
+- **Measure the simulated clock in Space time, not wall-clock time.** Under a loaded suite SwiftShader pages drop under 10 fps, each frame hits the engine's 0.1 s delta clamp (`MAX_DELTA_SECONDS`), and simulated time falls behind the wall clock by design (021's speed test read 5.3 instead of 7 d/s). Sum rAF deltas clamped the same way in the page and divide by that (022 T061).
+
+- **Holding a request in E2E:** a `page.route` handler that stores `() => route.continue()` instead of calling it keeps that request pending until the test releases it: deterministic "slow image" and "leave mid-load" cases without timers. `page.unrouteAll({ behavior: 'wait' })` before re-routing (022 T062).
 
 ## Routing
 

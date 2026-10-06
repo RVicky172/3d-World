@@ -50,7 +50,7 @@ _Goal: many objects in one shared world, animated together._
 | --- | -------------------------------------------------------------------------------------------------- | ------------------------------------ | ------ |
 | 020 | Solar system data model (Sun, 8 planets, major moons) with stylised + real scale modes             | `features/020-solar-system-data`     | ✔️     |
 | 021 | Orbital mechanics: circular → Keplerian orbits, axial tilt, rotation; time controls (pause, speed) | `features/021-orbital-mechanics`     | ✔️     |
-| 022 | Planet textures, Saturn rings, starfield background, Sun glow                                      | `features/022-solar-system-surfaces` | 🚧     |
+| 022 | Planet textures, Saturn rings, starfield background, Sun glow                                      | `features/022-solar-system-surfaces` | ✔️     |
 | 023 | Selection & focus: click a planet to fly the camera to it, show facts                              | —                                    | ⬜     |
 
 ## Phase 4 — Polish & Launch

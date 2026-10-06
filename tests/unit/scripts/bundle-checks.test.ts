@@ -127,6 +127,16 @@ describe('checkSpaceBudgets (spec 010, AC-12)', () => {
     expect(errors[0]).toMatch(/demo-cube.*6\.0 MB.*5 MB/);
   });
 
+  it('a Space can have its own, tighter budget (022 AC-13, D-030: the Solar System ≤ 4 MB)', () => {
+    const { errors } = checkSpaceBudgets({
+      ...input(() => 4.5 * 1024 * 1024),
+      budgetFor: { 'demo-cube': 4 * 1024 * 1024 },
+    });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/demo-cube.*4\.5 MB.*4 MB/);
+    expect(checkSpaceBudgets({ ...input(() => 4.5 * 1024 * 1024) }).errors).toEqual([]); // default 5 MB
+  });
+
   it('a Space without an asset folder is measured by its code alone', () => {
     const { errors, sizes } = checkSpaceBudgets(input(() => 0));
     expect(errors).toEqual([]);

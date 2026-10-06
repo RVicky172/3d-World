@@ -31,6 +31,14 @@ export async function gotoSpace(page: Page, id: string): Promise<void> {
 }
 
 /**
+ * Waits until the open view's background content (e.g. the Solar System's imagery, spec 022) has arrived, so
+ * measurements against the wall clock don't straddle its texture uploads and shader compiles.
+ */
+export async function waitForBackground(page: Page): Promise<void> {
+  await expect(page.locator('body')).toHaveAttribute('data-space-background', 'done', { timeout: 30_000 });
+}
+
+/**
  * Marks the current document. Returns a check that is true while the same document is still loaded,
  * i.e. no full page reload happened in between (spec 002, AC-2/AC-3).
  */

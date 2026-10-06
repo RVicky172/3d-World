@@ -1,17 +1,29 @@
 // @ts-check
 // Pure rules for the asset pipeline (spec 011, AC-14): manifest validation, per-slot texture settings, and
-// checks on what `build-assets.mjs` produced. Unit-tested in tests/unit/scripts/asset-pipeline.test.ts.
+// checks on what `build-assets.mjs` produced. Spec 022 adds standalone textures: one image → one KTX2 file.
+// Unit-tested in tests/unit/scripts/asset-pipeline.test.ts.
 
 /**
  * @typedef {'etc1s' | 'uastc'} TextureMode
  * @typedef {{
+ *   kind?: 'model';
  *   id: string;
  *   source: string;
  *   output: string;
  *   maxBytes: number;
  *   textures: { color: TextureMode; data: TextureMode };
  *   maxSize?: Record<string, number>;
- * }} AssetEntry
+ * }} ModelEntry
+ * @typedef {{
+ *   kind: 'texture';
+ *   id: string;
+ *   source: string;
+ *   output: string;
+ *   maxBytes: number;
+ *   mode: TextureMode;
+ *   color: boolean;
+ * }} TextureEntry one image → one `.ktx2`; `color` = sRGB (perceptual), else linear data
+ * @typedef {ModelEntry | TextureEntry} AssetEntry
  * @typedef {readonly AssetEntry[]} AssetManifest
  * @typedef {{
  *   id: string;
@@ -27,6 +39,8 @@
 const COLOR_SLOTS = new Set(['baseColorTexture', 'sheenColorTexture', 'emissiveTexture']);
 const MODES = new Set(['etc1s', 'uastc']);
 const MB = 1024 * 1024;
+/** The 12-byte file identifier every KTX2 file starts with: «KTX 20»\r\n\x1A\n. */
+export const KTX2_IDENTIFIER = [0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a];
 
 /**
  * Problems with the manifest, one message per problem, each naming the model; empty when it's valid.
@@ -55,9 +69,17 @@ export function validateManifest(manifest, exists) {
         `source file not found: ${entry.source} (add the original model there, see assets-src/README.md).`,
       );
     }
+    if (!(entry.maxBytes > 0)) fail('maxBytes must be a positive number.');
+    if (entry.kind === 'texture') {
+      if (!entry.output.startsWith('public/assets/')) fail('output must be under public/assets/.');
+      else if (!entry.output.endsWith('.ktx2')) fail('output must be a .ktx2 file.');
+      if (!/\.(jpe?g|png)$/.test(entry.source)) fail('source must be a .jpg or .png image.');
+      if (!MODES.has(entry.mode)) fail('mode must be "etc1s" or "uastc".');
+      if (typeof entry.color !== 'boolean') fail('color must be true (sRGB) or false (linear data).');
+      continue;
+    }
     if (!entry.output.startsWith('public/assets/')) fail('output must be under public/assets/.');
     else if (!entry.output.endsWith('.glb')) fail('output must be a .glb file.');
-    if (!(entry.maxBytes > 0)) fail('maxBytes must be a positive number.');
     for (const kind of /** @type {const} */ (['color', 'data'])) {
       if (!MODES.has(entry.textures[kind])) fail(`textures.${kind} must be "etc1s" or "uastc".`);
     }
@@ -71,10 +93,44 @@ export function validateManifest(manifest, exists) {
 }
 
 /**
+ * Problems with a generated standalone texture: over its size limit, not a KTX2 file, or sides that aren't
+ * multiples of four. `header` is the file's first 28 bytes.
+ * @param {{ id: string; bytes: number; maxBytes: number; header: Uint8Array }} report
+ * @returns {string[]}
+ */
+export function checkTextureOutput({ id, bytes, maxBytes, header }) {
+  /** @type {string[]} */
+  const errors = [];
+  const kb = (/** @type {number} */ n) => `${Math.round(n / 1024)} KB`;
+  if (bytes > maxBytes) errors.push(`${id}: output is ${kb(bytes)}, over its ${kb(maxBytes)} limit.`);
+  if (!KTX2_IDENTIFIER.every((byte, i) => header[i] === byte)) {
+    errors.push(`${id}: output is not a KTX2 file.`);
+    return errors;
+  }
+  // Block-compressed formats work in 4 × 4 blocks (KTX2Loader warns otherwise; some GPUs refuse the upload).
+  const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+  const [width, height] = [view.getUint32(20, true), view.getUint32(24, true)];
+  if (width % 4 || height % 4)
+    errors.push(`${id}: ${width} × ${height} is not a multiple of four in both dimensions.`);
+  return errors;
+}
+
+/**
+ * The nearest size whose sides are multiples of four (at least four), for block-compressed textures.
+ * @param {number} width
+ * @param {number} height
+ * @returns {{ width: number, height: number }}
+ */
+export function blockAligned(width, height) {
+  const align = (/** @type {number} */ n) => Math.max(4, Math.round(n / 4) * 4);
+  return { width: align(width), height: align(height) };
+}
+
+/**
  * Encoding for a texture used in `slots`. Data wins over colour when a texture is shared, because UASTC is the
  * higher-quality mode and data maps such as normals show ETC1S artefacts.
  * @param {readonly string[]} slots
- * @param {AssetEntry['textures']} modes
+ * @param {ModelEntry['textures']} modes
  * @returns {TextureMode}
  */
 export function textureMode(slots, modes) {

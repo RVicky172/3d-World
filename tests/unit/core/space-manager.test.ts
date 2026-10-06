@@ -773,6 +773,129 @@ describe('SpaceManager', () => {
     });
   });
 
+  describe('background progress (spec 022, AC-11)', () => {
+    let loading: {
+      show: ReturnType<typeof vi.fn<(label: string, options?: { background?: boolean }) => void>>;
+      hide: ReturnType<typeof vi.fn<() => void>>;
+      progress: ReturnType<typeof vi.fn<(fraction: number | null) => void>>;
+      ready: ReturnType<typeof vi.fn<() => void>>;
+    };
+    let bg: SpaceManager;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      loading = {
+        show: vi.fn<(label: string, options?: { background?: boolean }) => void>(),
+        hide: vi.fn<() => void>(),
+        progress: vi.fn<(fraction: number | null) => void>(),
+        ready: vi.fn<() => void>(),
+      };
+      a.meta.title = 'Space A';
+      bg = new SpaceManager({
+        engine,
+        fader,
+        registry: [a.meta, b.meta],
+        reducedMotion: () => false,
+        statusElement: status,
+        loading,
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const report = (instance: number, fraction: number | null) =>
+      a.instances[instance]!.ctx.reportBackgroundProgress!(fraction, 'imagery');
+
+    // A signal for tests to wait on (as data-space-ready), e.g. before measuring frame-rate-sensitive behaviour.
+    it('marks the status element: data-space-background "loading" until 1, then "done"; cleared on close', async () => {
+      await bg.open('a');
+      expect(status.dataset.spaceBackground).toBeUndefined();
+      report(0, 0.4);
+      expect(status.dataset.spaceBackground).toBe('loading');
+      report(0, 1);
+      expect(status.dataset.spaceBackground).toBe('done');
+      await bg.close();
+      expect(status.dataset.spaceBackground).toBeUndefined();
+      report(0, 0.5); // the closed view's late report changes nothing
+      expect(status.dataset.spaceBackground).toBeUndefined();
+    });
+
+    it('after the view is ready, shows a compact indicator after 250 ms with the progress', async () => {
+      await bg.open('a');
+      loading.show.mockClear();
+      report(0, 0.1);
+      expect(loading.show).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(250);
+      expect(loading.show).toHaveBeenCalledWith('Space A imagery', { background: true });
+      expect(loading.progress).toHaveBeenLastCalledWith(0.1);
+      report(0, 0.6);
+      expect(loading.progress).toHaveBeenLastCalledWith(0.6);
+    });
+
+    it('reaching 1 announces "… imagery loaded" when the indicator showed', async () => {
+      await bg.open('a');
+      report(0, 0.2);
+      await vi.advanceTimersByTimeAsync(250);
+      report(0, 1);
+      expect(loading.ready).toHaveBeenCalledTimes(1);
+    });
+
+    it('content that arrives within 250 ms shows and announces nothing', async () => {
+      await bg.open('a');
+      loading.show.mockClear();
+      report(0, 0.5);
+      report(0, 1);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(loading.show).not.toHaveBeenCalled();
+      expect(loading.ready).not.toHaveBeenCalled();
+    });
+
+    it('keeps reports made while the view was still opening, and shows them once it is ready', async () => {
+      const fadeIn = deferred<undefined>();
+      fader.in.mockImplementationOnce(() => fadeIn.promise); // hold the open just before "ready"
+      const open = bg.open('a');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(a.instances).toHaveLength(1); // created, not ready yet
+      report(0, 0.3);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(loading.show).not.toHaveBeenCalledWith('Space A imagery', { background: true });
+      fadeIn.resolve(undefined);
+      await open;
+      await vi.advanceTimersByTimeAsync(250);
+      expect(loading.show).toHaveBeenLastCalledWith('Space A imagery', { background: true });
+      expect(loading.progress).toHaveBeenLastCalledWith(0.3);
+    });
+
+    it('a newer open, close() or suspend() hides it and ignores the old view’s reports', async () => {
+      await bg.open('a');
+      report(0, 0.2);
+      await vi.advanceTimersByTimeAsync(250);
+      loading.hide.mockClear();
+      await bg.close();
+      expect(loading.hide).toHaveBeenCalled();
+      loading.show.mockClear();
+      loading.progress.mockClear();
+      report(0, 0.9);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(loading.show).not.toHaveBeenCalled();
+      expect(loading.progress).not.toHaveBeenCalled();
+
+      await bg.open('a');
+      report(1, 0.2);
+      bg.suspend();
+      loading.show.mockClear();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(loading.show).not.toHaveBeenCalled(); // the pending timer was cancelled
+    });
+
+    it('works without a loading indicator', async () => {
+      await manager.open('a');
+      expect(() => a.instances.at(-1)!.ctx.reportBackgroundProgress!(0.5, 'imagery')).not.toThrow();
+    });
+  });
+
   describe('info panel (spec 012, AC-1, AC-4, AC-15)', () => {
     let panels: Array<{
       id: string;

@@ -149,6 +149,24 @@ body {
   animation: none;
 }
 
+/*
+ * Content still arriving after the view is ready (spec 022, AC-11): a compact strip at the top centre that never
+ * blocks the view (no pointer events), below the back link on narrow screens.
+ */
+.loading.is-background {
+  top: 16px;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .loading.is-background {
+    top: 64px;
+  }
+}
+
 .loading-bar {
   height: 4px;
   border-radius: 2px;

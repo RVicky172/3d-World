@@ -61,6 +61,7 @@ src/
       occlusion.ts        # createOcclusion(): throttled any-hit ray test over a world-space triangle copy (D-021)
       types.ts            # HotspotConfig
     dispose.ts            # disposeObject3D(): geometries, materials, textures (incl. uniforms, background)
+    ktx2.ts               # configureKtx2() (model viewer) + createKtx2(): standalone KTX2 textures, workers freed (022)
   gallery/
     index.ts              # createGalleryView(): the gallery as a SpaceFactory (cards in overlay, starfield in scene)
     cards.ts              # renderGallery(): heading + list of card links; thumbnails with generated placeholder
@@ -86,18 +87,30 @@ src/
       markers.ts          # createBodyMarkers(): real-scale name labels, moon rule, declutter, nearest()
       scale-toggle.ts     # createScaleToggle(): "True scale" button + polite scale description
       index.ts            # createSolarSystem(): ties them together; re-centring zoom; dynamic near/far
+      surfaces.ts         # pure: longitudeOfU(), subPoint() — how the maps sit on the bodies (022)
+      materials.ts        # shader patches: image fade, Earth (ocean, night lights), clouds, Saturn's ring shadow (022)
+      rings.ts            # createRings(): Saturn's ring mesh + its own lit, shadowed shader (022)
+      ring-shadows.ts     # pure: inPlanetShadow(), ringShadowRadius() — mirrored by the shaders (022)
+      stars.ts            # decodeStars() + createStarfield(): the catalogue as one Points at infinity (022)
+      glow.ts             # glowSize() + createGlow(): the Sun's additive halo sprite (022)
+      imagery.ts          # imageryJobs(), loadImagery() (progress, failures, abort), createFader() (022)
   styles/main.css         # tokens; stacking: canvas → .overlay → .fader → .loading / .context-lost → .back-to-gallery
 scripts/
   bundle-checks.mjs       # pure bundle rules (unit-tested): entry budget, per-Space 5 MB (code + assets + emitted decoders)
   check-bundle.mjs        # runs them on dist/ after `npm run build`
   asset-pipeline.mjs      # pure pipeline rules (unit-tested): manifest validation, texture modes, output checks (011)
   assets.config.mjs       # which models `npm run assets` converts, and how
-  build-assets.mjs        # `npm run assets`: assets-src/ → Meshopt + KTX2 GLB in public/assets/ (dev only)
+  build-assets.mjs        # `npm run assets`: assets-src/ → Meshopt + KTX2 GLB, or image → .ktx2 (022), in public/assets/
+  solar-imagery.mjs       # pure: the Solar System's map list, sizes, conventions (unit-tested, 022)
+  fetch-solar-imagery.mjs # dev-only: downloads and normalises the maps into assets-src/solar-system/ (022)
+  star-catalogue.mjs      # pure: Yale BSC5 → stars.bin encoder (unit-tested, 022)
+  build-star-catalogue.mjs # dev-only: writes public/assets/solar-system/stars.bin (022)
 assets-src/<space-id>/    # original, uncompressed models; NOT deployed (011, D-017)
 tests/
   helpers/fakes.ts        # FakeScheduler, FakeVisibility, createFakeRenderer, createFakeContext
   unit/                   # Vitest, mirrors src/ (+ scripts/)
   e2e/                    # Playwright; fixtures.ts fails tests on console errors; subpath.spec.ts runs on /3d-World/
+                          # solar-helpers.ts: project(), snapshot() for the Solar System specs (020–022)
                           # workers capped at min(4, cores/4), override with E2E_WORKERS (D-015)
 public/
   assets/<space-id>/      # models, textures (licensed; see CREDITS.md)
@@ -245,6 +258,13 @@ open(B) / openView('gallery', f)
   - **`ready()`** (D-019): a persistent, visually hidden `.loading-announcer` polite region says "<title>
     loaded". It's created on `show()` (live regions must exist before their text changes) and cleared on the
     next show. Only `SpaceManager`'s success path calls it, and only after a shown indicator.
+- **Background progress (022, AC-11):** `SpaceContext.reportBackgroundProgress?(fraction | null, what)` is for
+  content arriving after the view is ready (the Solar System's imagery). It is bound to the request: reports made
+  while the view opens are held until it is ready; a newer request, `close()` or `suspend()` drops them. The same
+  indicator shows as a compact, non-blocking variant (`.loading.is-background`: top centre, no pointer events)
+  after the usual 250 ms, labelled "<title> <what>", with the same 25/50/75 % announcements; `1` hides it and
+  announces "<title> <what> loaded" if it showed. The status element carries `data-space-background`
+  ("loading", then "done"; D-032) for tests to wait on.
 
 ### Transition (Fader)
 
@@ -497,6 +517,11 @@ never run the encoder.
   variants), Meshopt and Basis present, and **every texture `image/ktx2`**. glTF-Transform's `ktx2()` transform
   only warns on failure, which is why the pipeline encodes per texture and checks afterwards. Any problem exits 1
   naming the model.
+- **Standalone textures (022, `kind: 'texture'`):** one image → one `.ktx2` with mipmaps (ETC1S; colour maps
+  sRGB, data maps linear: Earth's ocean mask and clouds), each with a byte cap. Sides are rounded to multiples
+  of four first (`blockAligned`), and `checkTextureOutput` checks the KTX2 identifier, the cap and the
+  dimensions (D-032). The Solar System's 20 maps come from `assets-src/solar-system/` (JPEG q95 at shipping size,
+  fetched once by `fetch-solar-imagery.mjs`, with `sources.json`): 2.40 MB in all.
 - **Deterministic:** two runs give byte-identical files. Chair: 4 029 KB → 1 286 KB in ~8 s.
 - **Adding a model:** put the original in `assets-src/<id>/`, add a manifest entry (`maxBytes`, texture modes,
   optional caps), run `npm run assets`, add the CREDITS row (marked "converted"), and commit both files.
@@ -543,51 +568,58 @@ composers.
 
 ## Testability Seams
 
-| Seam                          | Real                                                       | In tests                                                                                     |
-| ----------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Time                          | `createClock()`                                            | `FakeClock`                                                                                  |
-| Frames                        | `requestAnimationFrame`                                    | `FakeScheduler.flush(now)`                                                                   |
-| Visibility                    | `document`                                                 | `FakeVisibility.set('hidden')`                                                               |
-| Renderer (Engine)             | `WebGLRenderer`                                            | `createFakeRenderer()` (`RendererLike`)                                                      |
-| Resize                        | `ResizeObserver`                                           | injected `watchResize` callback                                                              |
-| Space context                 | built by `SpaceManager`                                    | `createFakeContext()`                                                                        |
-| Engine/Fader (Manager)        | `Engine`, `Fader`                                          | `ManagedEngine`, `Transition` fakes                                                          |
-| URL + history (Router)        | `window.location`, `window.history`, `window`              | `FakeBrowserLocation` (all three in one)                                                     |
-| Camera controls (unit)        | OrbitControls on the real canvas                           | real OrbitControls on a jsdom canvas; keyboard/wheel events; `FakeClock`-style deltas        |
-| Touch input (E2E)             | fingers                                                    | `touchGesture()`: CDP `Input.dispatchTouchEvent` (Chromium)                                  |
-| Gallery (unit)                | `createGalleryView` in `main.ts`                           | injected test registry; `createFakeContext()`                                                |
-| Sub-path hosting (E2E)        | GitHub Pages `/3d-World/`                                  | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174                      |
-| Running app (E2E)             | —                                                          | `window.__WORLD__` in `npm run build:test` builds                                            |
-| Context loss                  | GPU/driver reset on the renderer's canvas                  | unit: `EventTarget` canvas + fake engine/manager; E2E: `__WORLD__.loseContext()`             |
-| Motion preference             | `matchMedia('(prefers-reduced-motion: reduce)')`           | unit: fake `MediaQueryList` (`EventTarget` + `matches`); E2E: `page.emulateMedia()`          |
-| No WebGL2 / no renderer (E2E) | the browser                                                | init script patching `HTMLCanvasElement.prototype.getContext`                                |
-| Model loading (unit)          | `createGltfLoader`, PMREM studio environment, BASE_URL     | `ModelViewerDeps`: stub `createLoader`, `createEnvironment`, `baseUrl`                       |
-| Loader parts (unit)           | `FileLoader`, `KTX2Loader`, `GLTFLoader`, `MeshoptDecoder` | `LoaderParts` fakes passed to `createGltfLoader(renderer, parts)`                            |
-| Download progress (E2E)       | a slow network                                             | CDP `Network.emulateNetworkConditions` + a MutationObserver log                              |
-| Decoder workers (E2E)         | KTX2Loader's worker pool                                   | `page.workers()` / `page.on('worker')`                                                       |
-| Visual parity (E2E)           | the original model                                         | `page.route` serving `assets-src/…`; `canvasRgba()` + `meanPixelDifference()`                |
-| Slow / failed download (E2E)  | the network                                                | `page.route()` delaying or aborting the GLB, the transcoder, or serving a corrupt file       |
-| Framing and lighting (E2E)    | what the visitor sees                                      | `contentBounds()`: drawing-buffer bounds, fill of the smaller side, mean luminance           |
-| Preferences (unit)            | `window.localStorage`                                      | an injected `Storage` (incl. one that throws)                                                |
-| Marker placement (E2E)        | the hotspot module's own projection                        | `__WORLD__.hotspots()` + `cameraPose()` + `cameraProjection()`, projected with three in Node |
-| Hotspot controls (unit)       | `turnTo` / `holdTurntable` of the shared controls          | `vi.fn()` controls; real camera and three meshes for occlusion                               |
-| Solar system bodies (E2E)     | the Space's own drawing and markers                        | `__WORLD__.bodies()` + `cameraPose()` + `cameraProjection()`, projected with three in Node   |
-| Scale preference (unit)       | `window.localStorage`                                      | `memoryStorage()` (`tests/helpers/fakes.ts`) via `SolarSystemDeps.storage`                   |
-| Pointer events (unit)         | `PointerEvent`, pointer capture                            | `MouseEvent` with `pointerId`/`pointerType` defined; stubbed `setPointerCapture` (jsdom)     |
-| Touch re-centring (E2E)       | fingers landing on a marker                                | `touchGesture(page, fingers, 0)`: touch start and end, no moves                              |
-| Wall clock (core, 021)        | `Date.now` passed to `SpaceManager({ wallClock })`         | a constant; `createFakeContext()` has `startTime` 2026-10-05                                 |
-| Simulated time (E2E, 021)     | the time controls and `update(delta)`                      | `__WORLD__.simTime()` / `setSimTime(days)`; speeds measured against `performance.now()`      |
-| Orbit accuracy (unit, 021)    | JPL ephemerides                                            | `tests/fixtures/horizons-positions.json` (dev-only `scripts/fetch-reference-positions.mjs`)  |
-| Moving markers (E2E, 021)     | markers and bodies in the same frame                       | camera, `bodies()` and marker dots read in one `page.evaluate`, projected in Node            |
+| Seam                                | Real                                                       | In tests                                                                                                                          |
+| ----------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Time                                | `createClock()`                                            | `FakeClock`                                                                                                                       |
+| Frames                              | `requestAnimationFrame`                                    | `FakeScheduler.flush(now)`                                                                                                        |
+| Visibility                          | `document`                                                 | `FakeVisibility.set('hidden')`                                                                                                    |
+| Renderer (Engine)                   | `WebGLRenderer`                                            | `createFakeRenderer()` (`RendererLike`)                                                                                           |
+| Resize                              | `ResizeObserver`                                           | injected `watchResize` callback                                                                                                   |
+| Space context                       | built by `SpaceManager`                                    | `createFakeContext()`                                                                                                             |
+| Engine/Fader (Manager)              | `Engine`, `Fader`                                          | `ManagedEngine`, `Transition` fakes                                                                                               |
+| URL + history (Router)              | `window.location`, `window.history`, `window`              | `FakeBrowserLocation` (all three in one)                                                                                          |
+| Camera controls (unit)              | OrbitControls on the real canvas                           | real OrbitControls on a jsdom canvas; keyboard/wheel events; `FakeClock`-style deltas                                             |
+| Touch input (E2E)                   | fingers                                                    | `touchGesture()`: CDP `Input.dispatchTouchEvent` (Chromium)                                                                       |
+| Gallery (unit)                      | `createGalleryView` in `main.ts`                           | injected test registry; `createFakeContext()`                                                                                     |
+| Sub-path hosting (E2E)              | GitHub Pages `/3d-World/`                                  | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174                                                           |
+| Running app (E2E)                   | —                                                          | `window.__WORLD__` in `npm run build:test` builds                                                                                 |
+| Context loss                        | GPU/driver reset on the renderer's canvas                  | unit: `EventTarget` canvas + fake engine/manager; E2E: `__WORLD__.loseContext()`                                                  |
+| Motion preference                   | `matchMedia('(prefers-reduced-motion: reduce)')`           | unit: fake `MediaQueryList` (`EventTarget` + `matches`); E2E: `page.emulateMedia()`                                               |
+| No WebGL2 / no renderer (E2E)       | the browser                                                | init script patching `HTMLCanvasElement.prototype.getContext`                                                                     |
+| Model loading (unit)                | `createGltfLoader`, PMREM studio environment, BASE_URL     | `ModelViewerDeps`: stub `createLoader`, `createEnvironment`, `baseUrl`                                                            |
+| Loader parts (unit)                 | `FileLoader`, `KTX2Loader`, `GLTFLoader`, `MeshoptDecoder` | `LoaderParts` fakes passed to `createGltfLoader(renderer, parts)`                                                                 |
+| Download progress (E2E)             | a slow network                                             | CDP `Network.emulateNetworkConditions` + a MutationObserver log                                                                   |
+| Decoder workers (E2E)               | KTX2Loader's worker pool                                   | `page.workers()` / `page.on('worker')`                                                                                            |
+| Visual parity (E2E)                 | the original model                                         | `page.route` serving `assets-src/…`; `canvasRgba()` + `meanPixelDifference()`                                                     |
+| Slow / failed download (E2E)        | the network                                                | `page.route()` delaying or aborting the GLB, the transcoder, or serving a corrupt file                                            |
+| Framing and lighting (E2E)          | what the visitor sees                                      | `contentBounds()`: drawing-buffer bounds, fill of the smaller side, mean luminance                                                |
+| Preferences (unit)                  | `window.localStorage`                                      | an injected `Storage` (incl. one that throws)                                                                                     |
+| Marker placement (E2E)              | the hotspot module's own projection                        | `__WORLD__.hotspots()` + `cameraPose()` + `cameraProjection()`, projected with three in Node                                      |
+| Hotspot controls (unit)             | `turnTo` / `holdTurntable` of the shared controls          | `vi.fn()` controls; real camera and three meshes for occlusion                                                                    |
+| Solar system bodies (E2E)           | the Space's own drawing and markers                        | `__WORLD__.bodies()` + `cameraPose()` + `cameraProjection()`, projected with three in Node                                        |
+| Scale preference (unit)             | `window.localStorage`                                      | `memoryStorage()` (`tests/helpers/fakes.ts`) via `SolarSystemDeps.storage`                                                        |
+| Pointer events (unit)               | `PointerEvent`, pointer capture                            | `MouseEvent` with `pointerId`/`pointerType` defined; stubbed `setPointerCapture` (jsdom)                                          |
+| Touch re-centring (E2E)             | fingers landing on a marker                                | `touchGesture(page, fingers, 0)`: touch start and end, no moves                                                                   |
+| Wall clock (core, 021)              | `Date.now` passed to `SpaceManager({ wallClock })`         | a constant; `createFakeContext()` has `startTime` 2026-10-05                                                                      |
+| Simulated time (E2E, 021)           | the time controls and `update(delta)`                      | `__WORLD__.simTime()` / `setSimTime(days)`; speeds measured per second of Space time (rAF deltas clamped as the engine does, 022) |
+| Orbit accuracy (unit, 021)          | JPL ephemerides                                            | `tests/fixtures/horizons-positions.json` (dev-only `scripts/fetch-reference-positions.mjs`)                                       |
+| Moving markers (E2E, 021)           | markers and bodies in the same frame                       | camera, `bodies()` and marker dots read in one `page.evaluate`, projected in Node                                                 |
+| Imagery and stars (unit, 022)       | `createKtx2(renderer)`, `fetch`, BASE_URL                  | `SolarSystemDeps`: `createKtx2` (a stub whose loads finish on demand), `loadStars`, `baseUrl`                                     |
+| Shader patches (unit, 022)          | three compiling the program on the GPU                     | `onBeforeCompile` run on three's real `ShaderLib` sources (no WebGL): anchors, uniforms                                           |
+| Background content (E2E, 022)       | imagery arriving after the view is ready                   | `body[data-space-background="done"]` (`waitForBackground`)                                                                        |
+| One texture's effect (E2E, 022)     | the same view with and without a map                       | two pages on one camera pose and a fixed date, one with `page.route` answering 404; diffed                                        |
+| Slow image (E2E, 022)               | the network                                                | a `page.route` handler holding `route.continue()` until the test releases it                                                      |
+| Ring and shadow geometry (E2E, 022) | the shaders                                                | each pixel traced in Saturn's frame from `bodies()` (orientation) and the camera, in Node                                         |
 
 `window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory`, `cameraAspect`, `cameraPose`,
 `cameraProjection`, `hotspots`, `bodies`, `simTime` / `setSimTime` (021), and `loseContext` / `restoreContext` (three's `forceContextLoss/Restore`; restore only after `data-webgl="lost"`). It is installed behind a
 literal `import.meta.env.MODE !== 'production'` check, so production bundles drop it. `npm run build` verifies this.
 
-## Solar System (`src/spaces/solar-system/`, 020–021)
+## Solar System (`src/spaces/solar-system/`, 020–022)
 
 The first multi-object Space: the Sun, eight planets and the seven moons ≥ 1 000 km (D-022), stylised or true to
-scale, moving on their orbits as a simulated clock runs (021). 022 adds surfaces, 023 selection and facts.
+scale, moving on their orbits as a simulated clock runs (021), with real surfaces, Saturn's rings, the night sky
+and a glowing Sun (022). 023 adds selection and facts.
 
 - **Data (`data.ts`):** 16 `BodyData` records copied from JPL (Horizons physical data, planetary physical
   parameters, J2000 approximate elements, satellite mean elements; NSSDC was unreachable), each with its source
@@ -668,9 +700,39 @@ scale, moving on their orbits as a simulated clock runs (021). 022 adds surfaces
   controls bar and the info sheet is lifted to 180 px).
 - **Tab order:** back link → 3D view → info toggle → "True scale" → Play/Pause → Speed → Backwards → "?" →
   "Reset view".
-- **Budget:** 17.3 KB gzipped (020: 12.3), no assets; entry 146.6 KB (020 +0.5, 021 +0.1).
+- **Surfaces (022):**
+  - **Imagery data:** every body has an `imagery` map (KTX2, equirectangular, 0° longitude at the centre, east to
+    the right); Earth has `layers` (clouds, night lights, ocean mask) and Saturn `rings` (74 490–136 780 km, PDS
+    Rings Node; a radial colour/opacity strip calibrated to that span). `SphereGeometry` puts u = 0.5 on local +X,
+    which 021 points at the prime meridian, so no offset is needed (`surfaces.ts`, AC-2).
+  - **Loading (`imagery.ts`):** after the factory returns (plain colours, ready), `loadImagery()` fetches all 20
+    maps through `createKtx2` and hands each to `scene.attach(id, layer, texture)`, which returns how to fade it;
+    `createFader` runs 0 → 1 over 0.5 s of `delta` (instant under reduced motion). Progress is bytes over the
+    recorded total, reported as background progress ("imagery"). A failed map keeps its body's colour (one
+    `console.warn` for all); leaving or a context loss aborts, and late textures are disposed. The loader (and its
+    2 workers) is freed once every load has settled. `stars.bin` loads beside it.
+  - **Materials (`materials.ts`):** `onBeforeCompile` patches on three's own materials, each named in the
+    program cache key and throwing if its chunk anchor is missing. The image fade mixes the 020 colour towards the
+    map. Earth: ocean-mask roughness (1 → 0.35) for a sun glint on water only, night lights as an emissive map gated
+    by a smoothstep night factor (±~6° about the terminator) from `uSunView`, and a cloud layer (child sphere at
+    1.006 ×, alpha map, lit, no depth write).
+  - **Rings and shadows (`rings.ts`, `ring-shadows.ts`):** a `RingGeometry` in Saturn's equatorial plane, a child
+    of Saturn's mesh (both scales), drawn double-sided and transparent with its own shader: the sunlit face bright,
+    the other 0.3, Saturn's shadow 0.12. Saturn's body patch darkens the surface by the ring opacity where its ray
+    to the Sun crosses the rings. Both work in Saturn's local frame from one `uSunLocal` uniform, set each frame in
+    double precision (`scene.updateSun`). The near plane counts the rings' outer edge (2.349 radii).
+  - **Sky (`stars.ts`):** the Yale Bright Star Catalogue (9 096 stars, `stars.bin` 53 KB) as one `Points`:
+    `(P · mat3(V) · dir).xyww`, so stars sit at infinity at both scales; size and alpha by magnitude, colour by
+    B−V; render order −1, depth-tested, no depth write, never culled or picked; sizes follow the pixel ratio.
+  - **Glow (`glow.ts`):** an additive `Sprite` beside the Sun (a generated 128² falloff), depth-tested so the
+    Sun's disc and any body in front stay untouched, no depth write, sized each frame to max(4 Sun radii, 48 CSS
+    px at the Sun's distance).
+  - **Per frame (adds to 021's order):** fades advance by `delta`; after the camera's matrices, Earth's and
+    Saturn's Sun uniforms and the glow's size.
+- **Budget:** code 45.5 KB gzipped (021: 17.3; `KTX2Loader` is most of the growth) + imagery and stars 2.46 MB +
+  the shared Basis decoder 571 KB = 3.06 MB (D-030 cap 4 MB); entry 147.9 KB (020 +0.5, 021 +0.1, 022 +1.3).
 
-## Multi-Object Pattern (planned, 022–023)
+## Multi-Object Pattern (planned, 023)
 
-- 022 adds textures, Saturn's rings, the starfield background and the Sun's glow; 023 adds selection and flying
-  to a body (it may reuse `focusOn`).
+- 022 added textures, Saturn's rings, the starfield background and the Sun's glow (see Solar System above); 023
+  adds selection and flying to a body (it may reuse `focusOn`).

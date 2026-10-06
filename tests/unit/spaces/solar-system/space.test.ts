@@ -1,8 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LineLoop, Mesh, PerspectiveCamera, Quaternion, Vector3, type BufferGeometry } from 'three';
+import { readFileSync } from 'node:fs';
+import {
+  CompressedTexture,
+  LineLoop,
+  Mesh,
+  MeshBasicMaterial,
+  PerspectiveCamera,
+  Points,
+  Quaternion,
+  ShaderLib,
+  Sprite,
+  UniformsUtils,
+  Vector3,
+  type BufferGeometry,
+  type Material,
+  type MeshStandardMaterial,
+  type ShaderMaterial,
+  type WebGLProgramParametersWithUniforms,
+} from 'three';
 import type { SpaceContext, SpaceInstance } from '../../../../src/core/types';
 import { BODIES, SOLAR_SYSTEM } from '../../../../src/spaces/solar-system/data';
 import { createSolarSystem, SCALE_PREFERENCE } from '../../../../src/spaces/solar-system';
+import { glowSize } from '../../../../src/spaces/solar-system/glow';
+import { FADE_SECONDS, imageryJobs } from '../../../../src/spaces/solar-system/imagery';
+import { EARTH_NIGHT_INTENSITY } from '../../../../src/spaces/solar-system/materials';
 import { createPlacement, layout, systemExtent } from '../../../../src/spaces/solar-system/scale';
 import { daysFromEpochMs, RANGE } from '../../../../src/spaces/solar-system/time';
 import { frameDistance } from '../../../../src/shared/model-viewer/framing';
@@ -27,6 +48,78 @@ const worldAt = (mode: 'stylised' | 'real', days: number) => {
   return world;
 };
 
+/**
+ * The imagery and star seams (spec 022): KTX2 loads that finish when a test says so, and the shipped catalogue
+ * once released. Every test opens with these, so none downloads anything.
+ */
+function stubImagery() {
+  const pending = new Map<string, { resolve: (t: CompressedTexture) => void; reject: (e: Error) => void }>();
+  const loads: string[] = [];
+  const textures: CompressedTexture[] = [];
+  const ktx2 = {
+    load: vi.fn(
+      (url: string) =>
+        new Promise<CompressedTexture>((resolve, reject) => {
+          const file = url.slice(url.lastIndexOf('/') + 1);
+          loads.push(file);
+          pending.set(file, { resolve, reject });
+        }),
+    ),
+    dispose: vi.fn(),
+  };
+  const settle = (file: string) => {
+    const entry = pending.get(file)!;
+    pending.delete(file);
+    return entry;
+  };
+  const make = () => {
+    const t = new CompressedTexture([], 4, 4);
+    vi.spyOn(t, 'dispose');
+    textures.push(t);
+    return t;
+  };
+  let releaseStars: () => void = () => {};
+  const stars = new Promise<void>((r) => (releaseStars = r));
+  return {
+    ktx2,
+    loads,
+    textures,
+    deps: {
+      createKtx2: () => ktx2,
+      loadStars: async () => {
+        await stars;
+        return STARS.buffer.slice(STARS.byteOffset, STARS.byteOffset + STARS.byteLength);
+      },
+      baseUrl: '/assets/solar-system/',
+    },
+    finish(file: string) {
+      const t = make();
+      settle(file).resolve(t);
+      return t;
+    },
+    fail: (file: string) => settle(file).reject(new Error(`404 ${file}`)),
+    finishAll() {
+      for (const file of [...pending.keys()]) settle(file).resolve(make());
+    },
+    releaseStars: () => releaseStars(),
+  };
+}
+const STARS = readFileSync('public/assets/solar-system/stars.bin');
+/** Lets pending promise callbacks run. */
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+/** Runs a material's onBeforeCompile on three's real shader source and returns the uniforms it binds. */
+const uniformsOf = (material: Material) => {
+  const lib = material instanceof MeshBasicMaterial ? ShaderLib.basic : ShaderLib.standard;
+  const shader = {
+    vertexShader: lib.vertexShader,
+    fragmentShader: lib.fragmentShader,
+    uniforms: UniformsUtils.clone(lib.uniforms),
+  } as unknown as WebGLProgramParametersWithUniforms;
+  material.onBeforeCompile(shader, undefined as never);
+  return shader.uniforms;
+};
+
 describe('createSolarSystem', () => {
   let ctx: SpaceContext;
   let storage: Storage;
@@ -43,9 +136,11 @@ describe('createSolarSystem', () => {
 
   afterEach(() => space?.dispose());
 
+  let imagery: ReturnType<typeof stubImagery>;
   const open = async (stored?: string) => {
     if (stored !== undefined) storage.setItem(SCALE_PREFERENCE, JSON.stringify(stored));
-    space = await createSolarSystem(ctx, { storage });
+    imagery = stubImagery();
+    space = await createSolarSystem(ctx, { storage, ...imagery.deps });
     space.resize(W, H);
     space.update(0, 0);
     return space;
@@ -483,5 +578,197 @@ describe('createSolarSystem', () => {
     expect(lines).toBe(0); // the orbit lines are gone
     expect(ctx.canvas.hasAttribute('aria-describedby')).toBe(false);
     expect(ctx.canvas.hasAttribute('tabindex')).toBe(false); // the controls are gone too
+  });
+
+  // Spec 022, T050 (AC-1, AC-4–AC-12): imagery, Earth's layers, Saturn's rings, the sky and the glow in the Space.
+  describe('surfaces (spec 022)', () => {
+    const mesh = (id: string) => space.scene.getObjectByName(id) as Mesh;
+    const material = (id: string) => mesh(id).material as MeshStandardMaterial;
+    const mixOf = (id: string) => uniformsOf(material(id)).uImageMix!.value as number;
+    const files = imageryJobs(BODIES).map((j) => j.file);
+    const saturn = BODIES.find((b) => b.id === 'saturn')!;
+
+    it('opens in plain colours before any imagery arrives, and reports its progress in the background', async () => {
+      const report = vi.fn();
+      ctx = createFakeContext({ reducedMotion: true, reportBackgroundProgress: report });
+      await open();
+      expect(imagery.loads).toEqual(files);
+      for (const b of BODIES) {
+        expect(material(b.id).map, b.id).toBeNull();
+        expect(mixOf(b.id), b.id).toBe(0);
+      }
+      imagery.finishAll();
+      await flush();
+      expect(report).toHaveBeenLastCalledWith(1, 'imagery');
+      expect(report.mock.calls.every(([, what]) => what === 'imagery')).toBe(true);
+    });
+
+    it('attaches each map to its body and layer; under reduced motion it shows at once', async () => {
+      await open();
+      const earth = imagery.finish('earth.ktx2');
+      const clouds = imagery.finish('earth-clouds.ktx2');
+      const night = imagery.finish('earth-night.ktx2');
+      const ocean = imagery.finish('earth-ocean.ktx2');
+      const sun = imagery.finish('sun.ktx2');
+      await flush();
+      expect(material('earth').map).toBe(earth);
+      expect(material('earth').emissiveMap).toBe(night);
+      expect(material('earth').roughnessMap).toBe(ocean);
+      expect(material('earth').emissiveIntensity).toBe(EARTH_NIGHT_INTENSITY);
+      expect((mesh('sun').material as MeshBasicMaterial).map).toBe(sun);
+      const cloudLayer = space.scene.getObjectByName('earth-clouds') as Mesh;
+      const cloudMaterial = cloudLayer.material as MeshStandardMaterial;
+      expect(cloudMaterial.alphaMap).toBe(clouds);
+      expect(cloudLayer.visible).toBe(true);
+      expect(cloudMaterial.opacity).toBe(1);
+      expect(mixOf('earth')).toBe(1);
+      expect(mixOf('sun')).toBe(1);
+      expect(mixOf('mars')).toBe(0); // not arrived yet
+    });
+
+    it('fades an arriving map in over FADE_SECONDS of frame delta', async () => {
+      ctx = createFakeContext({ reducedMotion: false });
+      document.body.replaceChildren(ctx.canvas, ctx.overlay);
+      await open();
+      imagery.finish('mars.ktx2');
+      imagery.finish('saturn-rings.ktx2');
+      await flush();
+      expect(mixOf('mars')).toBe(0);
+      space.update(FADE_SECONDS / 2, 1);
+      expect(mixOf('mars')).toBeCloseTo(0.5, 9);
+      const rings = space.scene.getObjectByName('saturn-rings') as Mesh;
+      expect((rings.material as ShaderMaterial).uniforms.uImageMix!.value).toBeCloseTo(0.5, 9);
+      space.update(FADE_SECONDS, 2);
+      expect(mixOf('mars')).toBe(1);
+    });
+
+    it('a failed map leaves its body coloured and the rest still arrive', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await open();
+      imagery.fail('jupiter.ktx2');
+      imagery.finishAll();
+      await flush();
+      expect(material('jupiter').map).toBeNull();
+      expect(mixOf('jupiter')).toBe(0);
+      expect(material('mars').map).not.toBeNull();
+      expect(warn).toHaveBeenCalledOnce();
+      warn.mockRestore();
+      space.update(1 / 60, 1 / 60); // still runs
+    });
+
+    it('points Earth’s night side and Saturn’s ring shadow at the Sun for the date', async () => {
+      await open();
+      space.update(0, 0);
+      const sunView = uniformsOf(material('earth')).uSunView!.value as Vector3;
+      const expectedView = new Vector3(0, 0, 0).applyMatrix4(camera().matrixWorldInverse);
+      expect(sunView.distanceTo(expectedView)).toBeLessThan(1e-9 * (1 + expectedView.length()));
+
+      const sunLocal = () => {
+        const local = new Vector3(...body('saturn').world).negate(); // Saturn → Sun (the Sun at the origin)
+        local.applyQuaternion(new Quaternion(...body('saturn').quaternion!).invert()).normalize();
+        return local;
+      };
+      const uniform = uniformsOf(material('saturn')).uSunLocal!.value as Vector3;
+      expect(uniform.angleTo(sunLocal())).toBeLessThan(1e-9);
+      const before = uniform.clone();
+      space.setSimTime!(daysFromEpochMs(Date.UTC(2032, 5, 1)));
+      space.update(0, 0);
+      expect(uniform.angleTo(sunLocal())).toBeLessThan(1e-9);
+      expect(uniform.angleTo(before)).toBeGreaterThan(0.01); // the rings open between 2026 and 2032
+      const rings = space.scene.getObjectByName('saturn-rings') as Mesh;
+      expect((rings.material as ShaderMaterial).uniforms.uSunLocal!.value).toBe(uniform);
+    });
+
+    it('sizes the Sun’s glow every frame from the camera’s distance', async () => {
+      await open('real');
+      const glow = space.scene.getObjectByName('sun-glow') as Sprite;
+      const size = () =>
+        glowSize(
+          body('sun').radius,
+          camera().position.distanceTo(new Vector3(...body('sun').world)),
+          FOV_Y,
+          H,
+        );
+      expect(glow.scale.x).toBeCloseTo(size(), 6);
+      toggle().click();
+      space.update(1 / 60, 1 / 60);
+      expect(glow.scale.x).toBeCloseTo(size(), 6);
+    });
+
+    it('has its sky, glow, clouds and rings at both scales', async () => {
+      await open();
+      imagery.releaseStars();
+      await flush();
+      for (const scale of ['stylised', 'real']) {
+        expect(space.scene.getObjectByName('stars'), scale).toBeInstanceOf(Points);
+        expect(space.scene.getObjectByName('sun-glow'), scale).toBeInstanceOf(Sprite);
+        expect(space.scene.getObjectByName('earth-clouds')!.parent, scale).toBe(mesh('earth'));
+        expect(space.scene.getObjectByName('saturn-rings')!.parent, scale).toBe(mesh('saturn'));
+        toggle().click();
+        space.update(0, 0);
+      }
+      // The sky hangs off the scene, not the system: the layout never scales or moves it.
+      expect(space.scene.getObjectByName('stars')!.parent).toBe(space.scene);
+    });
+
+    it('counts Saturn’s rings in the near plane, so a close camera never clips them', async () => {
+      await open('real');
+      for (let i = 0; i < 150; i++) {
+        const target = screenOf('saturn');
+        wheelAt(target.x, target.y, -300);
+        space.update(1 / 60, i / 60);
+      }
+      const r = body('saturn').radius;
+      const distance = camera().position.distanceTo(new Vector3(...body('saturn').world));
+      expect(distance).toBeLessThan(6 * r); // close enough for the rings to matter
+      const ringSurface = distance - (saturn.rings!.outerKm / saturn.radiusKm) * r;
+      expect(camera().near).toBeLessThanOrEqual(Math.max(1e-6, ringSurface / 2) * 1.1 + 1e-12);
+    });
+
+    it('dispose() frees imagery, sky, glow, clouds and rings, and textures that arrive afterwards', async () => {
+      await open();
+      const earth = imagery.finish('earth.ktx2');
+      const profile = imagery.finish('saturn-rings.ktx2');
+      imagery.releaseStars();
+      await flush();
+      const stars = space.scene.getObjectByName('stars') as Points;
+      const glow = space.scene.getObjectByName('sun-glow') as Sprite;
+      const rings = space.scene.getObjectByName('saturn-rings') as Mesh;
+      const spies = [
+        vi.spyOn(stars.geometry, 'dispose'),
+        vi.spyOn(stars.material as ShaderMaterial, 'dispose'),
+        vi.spyOn(glow.material, 'dispose'),
+        vi.spyOn(glow.material.map!, 'dispose'),
+        vi.spyOn(rings.geometry, 'dispose'),
+        vi.spyOn(rings.material as ShaderMaterial, 'dispose'),
+        vi.spyOn((space.scene.getObjectByName('earth-clouds') as Mesh).material as Material, 'dispose'),
+      ];
+      space.dispose();
+      for (const spy of spies) expect(spy).toHaveBeenCalledOnce();
+      expect(earth.dispose).toHaveBeenCalledOnce();
+      expect(profile.dispose).toHaveBeenCalledOnce();
+      imagery.finishAll();
+      await flush();
+      for (const t of imagery.textures) expect(t.dispose).toHaveBeenCalledOnce();
+      expect(space.scene.getObjectByName('stars')).toBeUndefined();
+      expect(space.scene.getObjectByName('sun-glow')).toBeUndefined();
+    });
+
+    it('stars that arrive after dispose are never added', async () => {
+      await open();
+      space.dispose();
+      imagery.releaseStars();
+      await flush();
+      expect(space.scene.getObjectByName('stars')).toBeUndefined();
+    });
+
+    it('a rebuild after a context loss loads its imagery again', async () => {
+      await open();
+      const saved = space.saveState!();
+      space.dispose();
+      ctx = createFakeContext({ reducedMotion: true, savedState: saved });
+      await open();
+      expect(imagery.loads).toEqual(files);
+    });
   });
 });

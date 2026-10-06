@@ -2,7 +2,7 @@
 // `npm run assets`: turns each original model in assets-src/ into its web-ready file in public/assets/
 // (spec 011): Meshopt geometry and KTX2 textures. Settings: scripts/assets.config.mjs; rules and checks:
 // scripts/asset-pipeline.mjs. Dev-only (D-018). Its output is committed, so the build never runs it.
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS, KHRTextureBasisu } from '@gltf-transform/extensions';
@@ -11,7 +11,15 @@ import { encodeToKTX2 } from 'ktx2-encoder';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 import sharp from 'sharp';
 import manifest from './assets.config.mjs';
-import { checkOutput, isColorTexture, maxSizeFor, textureMode, validateManifest } from './asset-pipeline.mjs';
+import {
+  blockAligned,
+  checkOutput,
+  checkTextureOutput,
+  isColorTexture,
+  maxSizeFor,
+  textureMode,
+  validateManifest,
+} from './asset-pipeline.mjs';
 
 /** Basis settings per mode, as chosen in the 011 T003 spike. */
 const ENCODE = {
@@ -54,7 +62,7 @@ async function quietly(task) {
 const kb = (bytes) => `${Math.round(bytes / 1024)} KB`;
 
 /**
- * @param {import('./asset-pipeline.mjs').AssetEntry} entry
+ * @param {import('./asset-pipeline.mjs').ModelEntry} entry
  * @param {NodeIO} io
  * @returns {Promise<string[]>} errors from the output checks
  */
@@ -114,6 +122,44 @@ async function build(entry, io) {
   });
 }
 
+/**
+ * One image → one KTX2 file with mipmaps (spec 022): colour maps perceptual + sRGB, data maps linear.
+ * @param {import('./asset-pipeline.mjs').TextureEntry} entry
+ * @returns {Promise<string[]>} errors from the output checks
+ */
+async function buildTexture(entry) {
+  const started = Date.now();
+  let source = new Uint8Array(readFileSync(entry.source));
+  const { width = 0, height = 0 } = await sharp(source).metadata();
+  const aligned = blockAligned(width, height);
+  if (aligned.width !== width || aligned.height !== height) {
+    // Block compression needs sides in multiples of four (the ring strip is published 1024 × 63).
+    source = new Uint8Array(
+      await sharp(source).resize(aligned.width, aligned.height, { fit: 'fill' }).png().toBuffer(),
+    );
+  }
+  const encoded = await quietly(() =>
+    encodeToKTX2(source, {
+      ...ENCODE[entry.mode],
+      isPerceptual: entry.color,
+      isSetKTX2SRGBTransferFunc: entry.color,
+      generateMipmap: true,
+      imageDecoder: decodeImage,
+    }),
+  );
+  mkdirSync(dirname(entry.output), { recursive: true });
+  writeFileSync(entry.output, encoded);
+  console.log(
+    `  ${entry.mode}${entry.color ? ' sRGB' : ' linear'}: ${kb(source.byteLength)} → ${kb(encoded.byteLength)} in ${((Date.now() - started) / 1000).toFixed(1)} s`,
+  );
+  return checkTextureOutput({
+    id: entry.id,
+    bytes: encoded.byteLength,
+    maxBytes: entry.maxBytes,
+    header: encoded.subarray(0, 28), // identifier, then pixelWidth/pixelHeight at 20 and 24
+  });
+}
+
 const problems = validateManifest(manifest, existsSync);
 if (problems.length > 0) {
   console.error(problems.join('\n'));
@@ -129,7 +175,7 @@ const io = new NodeIO()
 const errors = [];
 for (const entry of manifest) {
   console.log(`${entry.id}: ${entry.source} → ${entry.output}`);
-  errors.push(...(await build(entry, io)));
+  errors.push(...(entry.kind === 'texture' ? await buildTexture(entry) : await build(entry, io)));
 }
 if (errors.length > 0) {
   console.error(errors.join('\n'));

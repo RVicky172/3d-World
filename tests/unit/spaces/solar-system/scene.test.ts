@@ -56,10 +56,18 @@ describe('buildSystem (no rendering)', () => {
     expect(() => buildSystem([...BODIES, orphan])).toThrow(/vulcan/);
   });
 
-  it('draws 16 bodies with one shared sphere geometry', () => {
+  it('draws 16 bodies with one shared sphere geometry, plus Earth’s clouds and Saturn’s rings (022)', () => {
     const meshes = meshesOf(buildSystem(BODIES).root);
-    expect(meshes.map((m) => m.name).sort()).toEqual(BODIES.map((b) => b.id).sort());
-    expect(new Set(meshes.map((m) => m.geometry)).size).toBe(1);
+    const ids = new Set(BODIES.map((b) => b.id));
+    const bodies = meshes.filter((m) => ids.has(m.name));
+    expect(bodies.map((m) => m.name).sort()).toEqual([...ids].sort());
+    expect(new Set(bodies.map((m) => m.geometry)).size).toBe(1);
+    expect(
+      meshes
+        .filter((m) => !ids.has(m.name))
+        .map((m) => m.name)
+        .sort(),
+    ).toEqual(['earth-clouds', 'saturn-rings']);
   });
 
   it('lights the bodies from the Sun: a self-lit Sun, a decay-free point light at its centre, faint ambient (AC-10)', () => {
