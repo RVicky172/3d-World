@@ -1,6 +1,7 @@
 import { Spherical, Vector3 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createControlsUi } from './controls-ui';
+import { flyPath, type FlyPath } from './fly';
 import { keyAction, orbitStep, panStep, zoomStep, type KeyAction } from './keyboard';
 import { easeTurn, turnStep } from './turn';
 import { Turntable } from './turntable';
@@ -58,6 +59,11 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
     duration: number;
   } | null = null;
 
+  /** A `flyTo()` in progress: the zoom-and-pan path and the directions to turn between (spec 023). */
+  let fly: { path: FlyPath; from: Vector3; to: Vector3; elapsed: number } | null = null;
+  const flySample = { target: new Vector3(), distance: 0 };
+  const flyDirection = new Vector3();
+
   let userMoved = false;
   /** The home view's closest distance; a `focusOn()` may set its own until `reset()`. */
   let homeMinDistance = config.distance.min;
@@ -65,6 +71,7 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
   const interact = () => {
     userMoved = true;
     turn = null; // the visitor takes over
+    fly = null;
     turntable.interact();
     orbit.autoRotate = false;
     ui.dismissHint();
@@ -74,6 +81,11 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
   orbit.addEventListener('end', interact);
 
   function reset() {
+    reframe();
+    options.onReset?.();
+  }
+
+  function reframe() {
     interact();
     focusMinDistance = null;
     orbit.minDistance = homeMinDistance;
@@ -141,6 +153,7 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
     turntable.interact();
     orbit.autoRotate = false;
     turn = null;
+    fly = null;
     if (reducedMotion || duration <= 0) {
       place(to, focus, distance);
       return;
@@ -156,6 +169,54 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
     orbit.minDistance = focusMinDistance ?? homeMinDistance;
     orbit.target.set(...point);
     settle(); // re-derives the view from where the camera is, within the limits
+  }
+
+  /** A direction clamped to the polar limits, as a unit vector. */
+  function clampPolar(direction: Vector3): Vector3 {
+    const spherical = new Spherical().setFromVector3(direction);
+    spherical.radius = 1;
+    spherical.phi = Math.min(orbit.maxPolarAngle, Math.max(orbit.minPolarAngle, spherical.phi));
+    return new Vector3().setFromSpherical(spherical);
+  }
+
+  function flyTo(
+    target: readonly [number, number, number],
+    position: readonly [number, number, number],
+    { minDistance, instant = false }: { minDistance?: number; instant?: boolean } = {},
+  ) {
+    settle();
+    interact(); // also ends any turn or flight in progress
+    focusMinDistance = minDistance ?? null;
+    orbit.minDistance = focusMinDistance ?? homeMinDistance;
+    const goal = new Vector3(...target);
+    const offset = new Vector3(...position).sub(goal);
+    const to = clampPolar(offset);
+    const toDistance = Math.min(orbit.maxDistance, Math.max(orbit.minDistance, offset.length()));
+    const fromDistance = camera.position.distanceTo(orbit.target);
+    const path = flyPath(
+      { target: orbit.target, distance: fromDistance },
+      { target: goal, distance: toDistance },
+      { widthPerDistance: 2 * Math.tan(((camera.fov / 2) * Math.PI) / 180) },
+    );
+    if (reducedMotion || instant || path.duration === 0) {
+      place(to, goal, toDistance);
+      return;
+    }
+    const from = camera.position.clone().sub(orbit.target).normalize();
+    fly = { path, from, to, elapsed: 0 };
+  }
+
+  /** Advances a flight in progress by `delta` seconds; clears it on landing. */
+  function advanceFly(delta: number) {
+    if (!fly) return;
+    fly.elapsed += delta;
+    const t = Math.min(1, fly.elapsed / fly.path.duration);
+    fly.path.at(t, flySample);
+    place(turnStep(fly.from, fly.to, t, flyDirection), flySample.target, flySample.distance);
+    if (t >= 1) {
+      fly = null;
+      turntable.interact(); // the idle delay counts from landing, not take-off
+    }
   }
 
   /** Advances a turn in progress by `delta` seconds; clears it at the end. */
@@ -211,11 +272,13 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
       if (disposed) return;
       turntable.tick(delta);
       advanceTurn(delta);
-      orbit.autoRotate = turntable.active && !turn;
+      advanceFly(delta);
+      orbit.autoRotate = turntable.active && !turn && !fly;
       orbit.update(delta);
       ui.tick(delta);
     },
     reset,
+    reframe,
     get turntableActive() {
       return turntable.active;
     },
@@ -226,8 +289,13 @@ export function createCameraControls(options: CameraControlsOptions): CameraCont
     setHome,
     turnTo,
     focusOn,
+    flyTo,
+    get flying() {
+      return fly !== null;
+    },
     follow({ x, y, z }) {
       // No update here: it would flush the visitor's damping each frame. The frame's update() clamps.
+      fly?.path.shift({ x, y, z }); // a flight lands on the moved point
       orbit.target.x += x;
       orbit.target.y += y;
       orbit.target.z += z;

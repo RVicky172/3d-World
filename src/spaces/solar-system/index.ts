@@ -1,11 +1,15 @@
 import { PerspectiveCamera, Quaternion, Scene, Vector3, type WebGLRenderer } from 'three';
 import { prefersCoarsePointer } from '../../core/capabilities';
 import { readPreference, writePreference } from '../../core/preferences';
-import type { SpaceContext, SpaceFactory, SpaceInstance } from '../../core/types';
+import type { InfoSlot, SpaceContext, SpaceFactory, SpaceInstance } from '../../core/types';
 import { createCameraControls } from '../../shared/controls';
+import { easeTurn } from '../../shared/controls/turn';
 import { createKtx2, type Ktx2 } from '../../shared/ktx2';
 import { distanceLimits, frameDistance } from '../../shared/model-viewer/framing';
+import { createBodyPanel, type BodyPanel } from './body-panel';
 import { BODIES, SKY, SOLAR_SYSTEM } from './data';
+import { factsFor, liveDistance } from './facts';
+import { clearArea, framingDistance, viewDirection, viewOffset, type Area } from './focus';
 import { createGlow } from './glow';
 import { createFader, loadImagery } from './imagery';
 import { createBodyMarkers } from './markers';
@@ -32,6 +36,11 @@ const MIN_DISTANCE_FACTOR = 1.2;
 const NEAR = { min: 1e-6, max: 1 };
 /** Following stops once the orbit target is further than this (relative) from the followed body (plan §6). */
 const FOLLOW_TOLERANCE = 1e-9;
+/** A press that moves further than this (CSS px) before release is a drag, not a click (spec 023, AC-1). */
+const CLICK_SLOP = 5;
+/** The view offset eases in this long when a body is selected (flights take at least as long), out on close. */
+const OFFSET_IN_SECONDS = 0.6;
+const OFFSET_OUT_SECONDS = 0.3;
 
 /** Seams for unit tests. */
 export interface SolarSystemDeps {
@@ -51,9 +60,10 @@ async function fetchBytes(url: string, signal: AbortSignal): Promise<ArrayBuffer
   return response.arrayBuffer();
 }
 
-/** What survives a WebGL context loss (spec 021, AC-12): the simulated time. */
+/** What survives a WebGL context loss: the simulated time (spec 021, AC-12) and the selection (023, AC-16). */
 interface SavedState {
   time: SimTime;
+  selected: string | null;
 }
 
 const isSimTime = (value: unknown): value is SimTime => {
@@ -88,8 +98,14 @@ export async function createSolarSystem(
 ): Promise<SpaceInstance> {
   const stored = readPreference(SCALE_PREFERENCE, 'stylised', deps.storage);
   let mode: ScaleMode = stored === 'real' ? 'real' : 'stylised';
-  const saved = (ctx.savedState as Partial<SavedState> | undefined)?.time;
+  const savedState = ctx.savedState as Partial<SavedState> | undefined;
+  const saved = savedState?.time;
   let time: SimTime = isSimTime(saved) ? saved : initialTime(ctx.startTime, ctx.reducedMotion);
+  /** A selection to restore after a context loss, once the viewport's size is known (first `resize`). */
+  let pendingSelect: string | null =
+    typeof savedState?.selected === 'string' && BODIES.some((b) => b.id === savedState.selected)
+      ? savedState.selected
+      : null;
 
   const layouts = new Map<ScaleMode, Map<string, BodyLayout>>();
   const layoutOf = (m: ScaleMode) => {
@@ -164,8 +180,9 @@ export async function createSolarSystem(
     camera,
     bodies: BODIES.map((b) => ({ id: b.id, name: b.name, parent: b.parent, size: b.radiusKm })),
     worldOf: world,
+    radiusOf: (id) => radii(id),
   });
-  markers.setActive(mode === 'real');
+  markers.setActive(true); // name labels at both scales (spec 023, AC-14)
   // "True scale" and the time controls share one bottom-left row, which wraps on narrow screens (plan §7).
   const bar = document.createElement('div');
   bar.className = 'solar-bar';
@@ -207,6 +224,7 @@ export async function createSolarSystem(
       turntable: SOLAR_SYSTEM.turntable,
       zoomSpeed: ZOOM_SPEED,
     },
+    onReset: () => deselect(), // "Reset view" goes home and clears a selection (spec 023, AC-12)
   });
 
   function setScale(next: ScaleMode) {
@@ -215,9 +233,9 @@ export async function createSolarSystem(
     system.applyLayout(layoutOf(mode));
     orbitLines.setMode(mode);
     place();
-    markers.setActive(mode === 'real');
     controls.setHome(homeFor(mode, homeDirection));
-    controls.reset(); // re-frame the whole system for the new scale (AC-8), instantly
+    controls.reframe(); // re-frame the whole system for the new scale (AC-8), instantly; keeps a selection
+    if (selected) frameSelected(true); // spec 023, AC-8: the same body, framed at the new scale
     fitDepth(true);
   }
 
@@ -263,10 +281,169 @@ export async function createSolarSystem(
 
   /** A pan, reset or re-centre elsewhere moved the target off the followed body: stop following (plan §6). */
   function checkFollowing() {
-    if (!following) return;
+    if (!following || controls.flying) return; // a flight is on its way to the body: `follow()` moves it along
     const off = controls.target.distanceTo(following.point);
     if (off > FOLLOW_TOLERANCE * (1 + following.point.length())) following = null;
   }
+
+  // --- Selection (spec 023): one body at a time, from a click on the canvas or the panel's list.
+  let selected: string | null = null;
+  /** The control that made the selection (a list button, or the 3D view after a click), for focus on close. */
+  let opener: HTMLElement | null = null;
+  let infoSlot: InfoSlot | null = null;
+  let bodyPanel: BodyPanel | null = null;
+  let viewportWidth = 1;
+
+  /** Selects a body: marks it, shows its facts, flies to it and follows it (AC-1–AC-5, plan §1–§5). */
+  function select(id: string, { instant = false } = {}) {
+    if (id === selected) return;
+    selected = id;
+    markers.setSelected(id);
+    bodyPanel?.setSelected(id);
+    bodyPanel?.setLive(liveDistance(id, time.days));
+    infoSlot?.showDescription(false);
+    infoSlot?.open();
+    controls.holdTurntable(true);
+    frameSelected(instant);
+  }
+
+  /**
+   * Flies (or jumps) to the selected body's end pose (plan §3): its disc a third of the clear area's shorter side,
+   * seen from its sunlit side, centred in the area the info panel leaves clear (§4); then follows it.
+   */
+  function frameSelected(instant: boolean) {
+    if (!selected) return;
+    const id = selected;
+    const clear = clearNow();
+    const point = world(id);
+    const r = radii(id);
+    const distance = framingDistance(r, fovY, viewportHeight, Math.min(clear.width, clear.height));
+    const current = camera.position.clone().sub(controls.target);
+    const direction = viewDirection(point, world('sun'), current);
+    const position = point.clone().addScaledVector(direction, distance);
+    controls.flyTo(point.toArray(), position.toArray(), { minDistance: MIN_DISTANCE_FACTOR * r, instant });
+    aimOffset(viewOffset(viewport(), clear), instant ? 0 : OFFSET_IN_SECONDS);
+    following = { id, point }; // the flight and then the view stay on it as time moves it
+  }
+
+  // --- The clear area (plan §4): a view offset puts the orbit target at the centre of what the panel leaves.
+  const viewport = () => ({ width: viewportWidth, height: viewportHeight });
+  /** The info panel's region in canvas px, or null when it isn't shown (collapsed: zero size). */
+  function clearNow(): Area {
+    const region = infoSlot?.content.closest<HTMLElement>('.info-panel') ?? null;
+    const rect = region?.getBoundingClientRect();
+    const canvas = ctx.canvas.getBoundingClientRect();
+    const panel =
+      rect && rect.width > 0 && rect.height > 0
+        ? {
+            left: rect.left - canvas.left,
+            top: rect.top - canvas.top,
+            width: rect.width,
+            height: rect.height,
+          }
+        : null;
+    return clearArea(viewport(), panel);
+  }
+  const offset = { x: 0, y: 0, fromX: 0, fromY: 0, toX: 0, toY: 0, t: 1, duration: 0 };
+  /** Eases the view offset to `to` over `duration` s of Space time (instant under reduced motion). */
+  function aimOffset(to: { x: number; y: number }, duration: number) {
+    Object.assign(offset, { fromX: offset.x, fromY: offset.y, toX: to.x, toY: to.y, t: 0 });
+    offset.duration = ctx.reducedMotion ? 0 : duration;
+    stepOffset(0);
+  }
+  function stepOffset(delta: number) {
+    if (offset.t >= 1) return;
+    offset.t = offset.duration > 0 ? Math.min(1, offset.t + delta / offset.duration) : 1;
+    const e = easeTurn(offset.t);
+    offset.x = offset.fromX + (offset.toX - offset.fromX) * e;
+    offset.y = offset.fromY + (offset.toY - offset.fromY) * e;
+    applyOffset();
+  }
+  function applyOffset() {
+    if (Math.abs(offset.x) < 0.01 && Math.abs(offset.y) < 0.01) {
+      if (camera.view?.enabled) camera.clearViewOffset();
+      return;
+    }
+    const { width, height } = viewport();
+    camera.setViewOffset(width, height, offset.x, offset.y, width, height);
+  }
+
+  /** Clears the selection (Escape, Close, "Reset view"; AC-12): the camera stays, following ends. */
+  function deselect() {
+    if (selected === null) return;
+    selected = null;
+    following = null;
+    markers.setSelected(null);
+    bodyPanel?.setSelected(null);
+    infoSlot?.showDescription(true);
+    controls.holdTurntable(false);
+    aimOffset({ x: 0, y: 0 }, OFFSET_OUT_SECONDS);
+    bodyPanel?.restoreFocus(opener);
+    opener = null;
+  }
+
+  // A click: one primary pointer, pressed and released within CLICK_SLOP px, no second pointer meanwhile.
+  let press: { id: number; x: number; y: number; moved: boolean; multi: boolean } | null = null;
+  const pointersDown = new Set<number>();
+  ctx.canvas.addEventListener(
+    'pointerdown',
+    (e) => {
+      pointersDown.add(e.pointerId);
+      if (pointersDown.size > 1) {
+        if (press) press.multi = true;
+        return;
+      }
+      press =
+        e.button === 0 ? { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, multi: false } : null;
+    },
+    { signal: listeners.signal },
+  );
+  ctx.canvas.addEventListener(
+    'pointermove',
+    (e) => {
+      if (
+        press &&
+        e.pointerId === press.id &&
+        Math.hypot(e.clientX - press.x, e.clientY - press.y) > CLICK_SLOP
+      ) {
+        press.moved = true;
+      }
+    },
+    { signal: listeners.signal },
+  );
+  ctx.canvas.addEventListener(
+    'pointerup',
+    (e) => {
+      pointersDown.delete(e.pointerId);
+      const done = press;
+      if (!done || e.pointerId !== done.id) return;
+      press = null;
+      const far = Math.hypot(e.clientX - done.x, e.clientY - done.y) > CLICK_SLOP;
+      if (done.moved || done.multi || far) return;
+      const rect = ctx.canvas.getBoundingClientRect();
+      const id = markers.hit(e.clientX - rect.left, e.clientY - rect.top);
+      if (!id) return; // empty space keeps the selection
+      opener = ctx.canvas;
+      select(id);
+    },
+    { signal: listeners.signal },
+  );
+  ctx.canvas.addEventListener(
+    'pointercancel',
+    (e) => {
+      pointersDown.delete(e.pointerId);
+      if (press?.id === e.pointerId) press = null;
+    },
+    { signal: listeners.signal },
+  );
+  // Escape clears a selection, unless it is closing the "?" help (checked before the help's own handler runs).
+  const onEscape = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || selected === null) return;
+    if (ctx.overlay.querySelector('.controls-help-toggle[aria-expanded="true"]')) return;
+    deselect();
+  };
+  ctx.overlay.addEventListener('keydown', onEscape, { capture: true, signal: listeners.signal });
+  ctx.canvas.addEventListener('keydown', onEscape, { signal: listeners.signal });
 
   // --- Depth: near plane at half the nearest surface (Saturn's: its rings' outer edge), far past the system.
   const radii = (id: string) => layoutOf(mode).get(id)!.radius;
@@ -314,7 +491,8 @@ export async function createSolarSystem(
   return {
     scene,
     camera,
-    // Plan §8: time → bodies (+ follow) → controls → follow check → depth → camera matrix → markers → date text.
+    // Plan §8: time → bodies (+ follow) → controls → follow check → depth → camera matrix → line detail → markers →
+    // date text.
     update(delta) {
       fader.advance(delta);
       const step = advance(time, delta);
@@ -326,22 +504,51 @@ export async function createSolarSystem(
       }
       controls.update(delta);
       checkFollowing();
+      stepOffset(delta);
       fitDepth();
       camera.updateMatrixWorld(); // the controls moved the camera; markers project from this frame's pose
+      orbitLines.setView(camera.position, (2 * Math.tan(fovY / 2)) / viewportHeight); // fine lines up close (D-040)
       system.updateSun(camera);
       glow.update(camera, viewportHeight);
       markers.update();
       if (time !== shown) {
         timeControls.set(time);
+        if (selected) bodyPanel?.setLive(liveDistance(selected, time.days)); // written only if the text changed
         shown = time;
       }
     },
     focusTarget: () => ctx.canvas, // the 3D view (spec 004, AC-13)
+    attachInfo(slot) {
+      infoSlot = slot;
+      bodyPanel = createBodyPanel({
+        container: slot.content,
+        bodies: BODIES,
+        factsFor,
+        onSelect: (id) => {
+          // Not "whatever has focus": Safari (and jsdom) don't focus a clicked button. Null makes the panel
+          // return focus to this body's own list button on close.
+          opener = null;
+          select(id);
+        },
+        onClose: () => deselect(),
+      });
+      slot.onOpenChange(() => {
+        if (selected) aimOffset(viewOffset(viewport(), clearNow()), OFFSET_OUT_SECONDS);
+      });
+      if (selected) {
+        // Restored after a context loss before the panel existed (AC-16).
+        bodyPanel.setSelected(selected);
+        bodyPanel.setLive(liveDistance(selected, time.days));
+        slot.showDescription(false);
+      }
+    },
+    selection: () => ({ id: selected, flying: controls.flying, following: following !== null }),
     resize(width, height) {
       aspect = width / height;
       camera.aspect = aspect;
       camera.updateProjectionMatrix();
       viewportHeight = height;
+      viewportWidth = width;
       stars?.setPixelRatio(ctx.renderer.getPixelRatio());
       markers.resize(width, height);
       // Untouched: re-frame along the current direction (keeps the turntable's angle). Moved: keep the view.
@@ -349,6 +556,15 @@ export async function createSolarSystem(
         ? homeDirection
         : camera.position.clone().sub(controls.target).normalize();
       controls.setHome(homeFor(mode, direction));
+      if (pendingSelect) {
+        const id = pendingSelect;
+        pendingSelect = null;
+        select(id, { instant: true }); // the selection from before a context loss (AC-16)
+      } else if (selected) {
+        aimOffset(viewOffset(viewport(), clearNow()), 0); // the clear area moved with the viewport
+      } else {
+        applyOffset();
+      }
       fitDepth(true);
     },
     bodies: () =>
@@ -358,7 +574,7 @@ export async function createSolarSystem(
         radius: radii(b.id),
         quaternion: system.mesh(b.id).getWorldQuaternion(new Quaternion()).toArray(),
       })),
-    saveState: (): SavedState => ({ time }),
+    saveState: (): SavedState => ({ time, selected }),
     simTime: () => ({ days: time.days, speed: signedSpeed(), playing: time.playing }),
     setSimTime(days) {
       time = { ...time, days: Math.min(RANGE.end, Math.max(RANGE.start, days)) };
@@ -373,6 +589,7 @@ export async function createSolarSystem(
       listeners.abort();
       controls.dispose();
       timeControls.dispose();
+      bodyPanel?.dispose();
       toggle.dispose();
       bar.remove();
       markers.dispose();

@@ -136,9 +136,42 @@ describe('installDebugHook', () => {
     it('cameraProjection() reports the perspective camera’s fov, aspect, near and far, else null (spec 012)', () => {
       expect(target.__WORLD__?.cameraProjection()).toBeNull();
       deps.engine.instance = instanceWith(new PerspectiveCamera(40, 1.5, 0.01, 300));
-      expect(target.__WORLD__?.cameraProjection()).toEqual({ fov: 40, aspect: 1.5, near: 0.01, far: 300 });
+      expect(target.__WORLD__?.cameraProjection()).toEqual({
+        fov: 40,
+        aspect: 1.5,
+        near: 0.01,
+        far: 300,
+        view: null,
+      });
       deps.engine.instance = instanceWith(new OrthographicCamera());
       expect(target.__WORLD__?.cameraProjection()).toBeNull();
+    });
+
+    it('cameraProjection() reports a view offset while one is set (spec 023)', () => {
+      const camera = new PerspectiveCamera(40, 0.5, 0.01, 300);
+      deps.engine.instance = instanceWith(camera);
+      camera.setViewOffset(320, 640, 0, 176, 320, 640);
+      expect(target.__WORLD__?.cameraProjection()?.view).toEqual({
+        fullWidth: 320,
+        fullHeight: 640,
+        offsetX: 0,
+        offsetY: 176,
+        width: 320,
+        height: 640,
+      });
+      camera.clearViewOffset();
+      expect(target.__WORLD__?.cameraProjection()?.view).toBeNull();
+    });
+
+    it('selection() reads the active Space’s selection, else null (spec 023)', () => {
+      expect(target.__WORLD__?.selection()).toBeNull();
+      deps.engine.instance = instanceWith(new PerspectiveCamera());
+      expect(target.__WORLD__?.selection()).toBeNull();
+      deps.engine.instance = {
+        ...instanceWith(new PerspectiveCamera()),
+        selection: () => ({ id: 'mars', flying: true, following: true }),
+      };
+      expect(target.__WORLD__?.selection()).toEqual({ id: 'mars', flying: true, following: true });
     });
   });
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PerspectiveCamera, Spherical, Vector3 } from 'three';
 import { createCameraControls } from '../../../../src/shared/controls';
 import type { CameraControls, CameraControlsConfig } from '../../../../src/shared/controls/types';
@@ -18,8 +18,10 @@ describe('createCameraControls', () => {
   let camera: PerspectiveCamera;
   let space: AbortController;
   let controls: CameraControls;
+  let onReset: ReturnType<typeof vi.fn<() => void>>;
 
   const create = (reducedMotion = false, config: CameraControlsConfig = CONFIG) => {
+    onReset = vi.fn<() => void>();
     controls = createCameraControls({
       camera,
       canvas,
@@ -29,6 +31,7 @@ describe('createCameraControls', () => {
       coarsePointer: false,
       label: 'Demo Cube',
       config,
+      onReset,
     });
     return controls;
   };
@@ -469,6 +472,174 @@ describe('createCameraControls', () => {
       const fast = zoomedBy(4);
       expect(normal).toBeLessThan(1);
       expect(Math.log(fast) / Math.log(normal)).toBeCloseTo(4, 1);
+    });
+  });
+
+  describe('flyTo(), onReset and reframe() (spec 023, AC-4–AC-6, AC-12)', () => {
+    /** Room to fly: a wide pan limit and zoom range. */
+    const WIDE: CameraControlsConfig = { ...CONFIG, panLimit: 100, distance: { min: 0.01, max: 50 } };
+    const direction = () => camera.position.clone().sub(controls.target).normalize();
+    /** Flies to look at `target` from 1.5 units along +x. */
+    const flyToX = (target: [number, number, number], minDistance?: number) =>
+      controls.flyTo(
+        target,
+        [target[0] + 1.5, target[1], target[2]],
+        minDistance ? { minDistance } : undefined,
+      );
+    const landed = () => {
+      for (let i = 0; i < 600 && controls.flying; i++) controls.update(1 / 60);
+    };
+
+    it('moves only through update(delta) and lands exactly on the requested view', () => {
+      create(false, WIDE);
+      const before = pose();
+      flyToX([10, 2, -3]);
+      expect(pose()).toEqual(before.map((v) => expect.closeTo(v, 9))); // nothing moves before a frame
+      expect(controls.flying).toBe(true);
+      frames(10);
+      expect(controls.flying).toBe(true);
+      expect(controls.target.distanceTo(new Vector3(0, 0, 0))).toBeGreaterThan(1e-3); // under way
+      landed();
+      expect(controls.flying).toBe(false);
+      expectAt(controls.target, [10, 2, -3]);
+      expectAt(camera.position, [11.5, 2, -3]);
+      frames(30); // nothing drifts after landing (damping flushed)
+      expectAt(camera.position, [11.5, 2, -3]);
+    });
+
+    it('takes the path’s duration of Space time (≤ 2 s), however the frames are cut', () => {
+      create(false, WIDE);
+      flyToX([30, 0, 0]);
+      let elapsed = 0;
+      while (controls.flying && elapsed < 5) {
+        controls.update(0.05);
+        elapsed += 0.05;
+      }
+      expect(elapsed).toBeLessThanOrEqual(2 + 1e-9);
+      expect(elapsed).toBeGreaterThanOrEqual(0.6 - 1e-9);
+    });
+
+    it('is instant with reduced motion', () => {
+      create(true, WIDE);
+      flyToX([4, 0, 1]);
+      expect(controls.flying).toBe(false);
+      expectAt(controls.target, [4, 0, 1]);
+      expectAt(camera.position, [5.5, 0, 1]);
+    });
+
+    it('{ instant: true } lands at once, even with motion allowed (a scale switch, spec 023 AC-8)', () => {
+      create(false, WIDE);
+      controls.flyTo([4, 0, 1], [5.5, 0, 1], { instant: true });
+      expect(controls.flying).toBe(false);
+      expectAt(controls.target, [4, 0, 1]);
+      expectAt(camera.position, [5.5, 0, 1]);
+    });
+
+    it('stays within the polar limits', () => {
+      create(true, WIDE);
+      controls.flyTo([0, 0, 0], [0, 3, 0.0001]); // from straight above
+      expect(polar()).toBeCloseTo(CONFIG.polar.min, 6);
+    });
+
+    it('minDistance holds after landing until reset()', () => {
+      create(true, WIDE);
+      flyToX([4, 0, 0], 1);
+      for (let i = 0; i < 40; i++) {
+        wheel(-500);
+        controls.update(1 / 60);
+      }
+      expect(distance()).toBeGreaterThanOrEqual(1 - 1e-9);
+      expect(distance()).toBeLessThan(1.1);
+      controls.reset();
+      for (let i = 0; i < 40; i++) {
+        wheel(-500);
+        controls.update(1 / 60);
+      }
+      expect(distance()).toBeLessThan(0.5); // WIDE's own limit again
+    });
+
+    it.each([
+      ['a key', () => press('ArrowUp')],
+      ['the wheel', () => wheel(-100)],
+      ['reset()', () => controls.reset()],
+      ['another flyTo()', () => flyToX([-5, 0, 0])],
+      ['a turnTo()', () => controls.turnTo([0, 1, 1])],
+    ])('%s cancels a flight in progress', (_name, cancel) => {
+      create(false, WIDE);
+      flyToX([20, 0, 0]);
+      frames(20);
+      cancel();
+      if (_name === 'another flyTo()') {
+        landed();
+        expectAt(controls.target, [-5, 0, 0]);
+        return;
+      }
+      expect(controls.flying).toBe(false);
+      frames(120);
+      expect(controls.target.distanceTo(new Vector3(20, 0, 0))).toBeGreaterThan(1); // never resumed
+    });
+
+    it('a cancel never jumps: the view stays where the last frame put it', () => {
+      create(false, WIDE);
+      flyToX([20, 0, 0]);
+      frames(20);
+      const target = controls.target.clone();
+      const dir = direction();
+      const dist = distance();
+      wheel(-100); // zoom only: the target and direction must not change
+      controls.update(1 / 60);
+      expect(controls.target.distanceTo(target)).toBeLessThan(1e-9);
+      expect(direction().angleTo(dir)).toBeLessThan(1e-6);
+      expect(distance()).toBeLessThan(dist);
+    });
+
+    it('follow() during a flight shifts it, so it lands on the moved point', () => {
+      create(false, WIDE);
+      flyToX([10, 0, 0]);
+      let moved = 0;
+      while (controls.flying) {
+        controls.follow({ x: 0, y: 0.01, z: 0 });
+        moved += 0.01;
+        controls.update(1 / 60);
+      }
+      expectAt(controls.target, [10, moved, 0]);
+      expectAt(camera.position, [11.5, moved, 0]);
+    });
+
+    it('counts as moving the camera; the turntable stays off while flying and restarts its idle delay', () => {
+      create(false, WIDE);
+      frames(10);
+      expect(controls.turntableActive).toBe(true);
+      flyToX([5, 0, 0]);
+      expect(controls.userMoved).toBe(true);
+      frames(10);
+      expect(controls.turntableActive).toBe(false);
+      landed();
+      frames(60 * 3);
+      expect(controls.turntableActive).toBe(false);
+      frames(60 * 1.5);
+      expect(controls.turntableActive).toBe(true);
+    });
+
+    it('onReset fires for the Reset button, the R key and reset()', () => {
+      create(true);
+      overlay.querySelector<HTMLButtonElement>('button.controls-reset')!.click();
+      press('r');
+      controls.reset();
+      expect(onReset).toHaveBeenCalledTimes(3);
+    });
+
+    it('reframe() goes home like reset(), cancels a flight, and does not fire onReset', () => {
+      create(false, WIDE);
+      flyToX([5, 0, 0]);
+      frames(10);
+      controls.reframe();
+      expect(controls.flying).toBe(false);
+      expectAt(controls.target, [0, 0, 0]);
+      expectAt(camera.position, [0, 0, 4]);
+      expect(controls.userMoved).toBe(false);
+      controls.setHome({ position: [0, 0, 5], distance: { min: 1, max: 9 }, panLimit: 2 });
+      expect(onReset).not.toHaveBeenCalled();
     });
   });
 

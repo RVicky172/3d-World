@@ -384,7 +384,8 @@ Baselines: entry 146.6 KB gzipped (021), allowance ≤ 5 KB; imagery + stars ≤
       `memory/MEMORY.md` and `memory/learnings.md`.
 
   **Result (2026-10-06):** 13 ACs ticked (AC-13 on the SwiftShader floor, D-034); spec Implemented; roadmap 022
-  ✔️; `progress.md`, `MEMORY.md`, `learnings.md` and `decisions.md` updated.
+  ✔️; `progress.md`, `MEMORY.md`, `learnings.md` and `decisions.md` updated. Committed `322b1b6` (2026-10-06,
+  `feat(022): solar system surfaces, rings, starfield and Sun glow`); not pushed yet.
 
 ## AC coverage
 

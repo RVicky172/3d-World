@@ -11,7 +11,76 @@ Newest first. One entry per working session.
 
 ---
 
-## 2026-10-06 — 022-solar-system-surfaces (Implemented)
+## 2026-10-06 — 023-selection-focus ✔️ Implemented
+
+**Done:**
+
+- `/spec-verify 023` (2026-10-06): fresh `check` (1034 unit), `test:e2e` (200/200; the fixture fails on any console error, gate 5), `build` (entry 148.0 KB, Space 3.06 MB; `__WORLD__` absent from `dist`) all green. Every AC traced to its tests; AC-6's drag-orbit cancel was only covered via the shared `start` listener, so added a direct unit case (fails with cancellation sabotaged). AC-17 rests on the build check + the T091/T054 SwiftShader FPS note (no real-GPU measurement). DoD gates 1–6 met.
+- T054 (D-040, lead's choice after T091): planets' real lines get a 256-point far copy; the 4 096-point line is drawn only where the copy's sag would show ≥ 0.5 px. 7 tests first; a 0.25 px sabotage fails. Real whole-system view 47–52 fps on SwiftShader (was 35–39). T091 re-run: 1034 unit, 200 E2E, build green, probe clean; T092: 17 ACs ticked, spec Implemented, roadmap 023 ✔️ (Phase 3 complete). Temp probes deleted. Not committed.
+- T091 (2026-10-06, later): check 1027, build OK, E2E 200/200 twice; AC-6 wheel-cancel E2E race fixed (pose read + wheel in one `evaluate`). Entry 148.0 KB, Space 3.06 MB; gate-5 probe clean. FPS (SwiftShader): flights 60 except real-scale to Neptune 47; real whole-system 35–39 vs 022 44–50 (worktree, same session) — cause D-038's 4 096-point lines. Not ticked: lead to decide. Temp `fps023.tmp.mjs`/`probe023.tmp.mjs` kept until T091 closes.
+- 022 docs: commit `322b1b6` and push state recorded (021 + 022 not pushed; `origin/main` = `601c597`).
+- 023 spec drafted; Q1–Q13 accepted as proposed (D-035); approved. Plan approved with three review points resolved
+  (D-036: the Sun's card omits distance/year, "day" = sidereal rotation, re-centre keeps the selection); 27 tasks.
+- T001 spike: real-scale close-ups with a `setViewOffset` clear area: centred to 0.00 px, disc ⅓ of the clear short
+  side, pixel-identical over 60 frames, orbit/zoom pivot on the body, 022 visuals fine. Findings → D-037 (one marker
+  rule at both scales; 2 048-point real planet orbit lines, T053).
+- T002: 16 descriptions + moon counts (JPL SSD discovery table: Mars 2, Jupiter 115, Saturn 293, Uranus 29,
+  Neptune 16; its footer date is stale) approved.
+- T010–T011: `InfoSlot` (`content`, `showDescription`, `open`, `onOpenChange`) from the core's info panel,
+  `SpaceInstance.attachInfo?` called after the panel mounts. T012: `__WORLD__.selection()`,
+  `cameraProjection().view`; E2E `cameraFrom`, `waitForFly`, `selectFromList`. 912 unit; info-panel, smoke and all
+  Solar E2E (48) green.
+
+- T020–T021: `src/shared/controls/fly.ts`: van Wijk–Nuij zoom-and-pan (`r = −asinh(b)` avoids cancellation at
+  real scale), smoothstep time, `duration` = min(2, 0.6 + 0.25 S), `shift()` for moving bodies. 12 tests; a
+  linear-distance sabotage fails 3 of them. 924 unit green.
+
+- T022–T023: shared controls `flyTo`/`flying`/`reframe()`/`onReset`; `follow()` shifts a flight; landing restarts the
+  turntable's idle delay. 939 unit, 177 E2E green.
+
+- T030: `picking.ts` `pick()`: discs (nearest camera wins), 22 px reach, shown name boxes count as distance 0. T031:
+  `focus.ts`: `framingDistance` (true silhouette), `viewDirection` (sunward, 40° round, 20° up; the Sun keeps the
+  current direction), `clearArea` (above a wide sheet, left of a side panel, whole view if < 25 % left),
+  `viewOffset`. Sabotage checks on depth, name boxes and the offset's sign. 960 unit green.
+
+- T032: `FACTS` + two `facts` sources; `facts.ts` (`factsFor`, `massKg`, formatters, `liveDistance`). 979 unit green.
+
+- T033–T034: markers take `radiusOf`; below 3 px a dot and the name 7 px out, from 3 px `is-disc` (no dot) and the
+  name at radius + 4 px via `--name-offset` (D-037); `setSelected` (highlight, declutter first); `hit()` → `pick()`
+  over discs, centres and shown name boxes. CSS unchanged for 020's sub-pixel markers (7 + 3 = 10 px). 987 unit,
+  48 Solar E2E green.
+
+- T040–T041: `body-panel.ts`: facts card (h3, description, `<dl>`, live line, "Close <Name>") before a "Bodies" list
+  of 16 `aria-pressed` buttons (moons nested under their planet), a polite announcer, `restoreFocus`. CSS: 44 px
+  buttons; a planet and its moons stay together without `display: contents` (it can drop list semantics). 1001 unit.
+
+- T050–T051: selection wired in the Space (clicks, list, fly + follow, Escape/Close/Reset, turntable hold,
+  `selection()`); labels at both scales; 020's stylised "no markers" assertions updated. 1016 unit, 177 E2E green.
+
+- T052: clear-area view offset (eased, instant under reduced motion), scale switch re-frames the selection
+  (`flyTo({ instant })`), live distance, selection saved across a context loss. 1024 unit, 177 E2E green.
+- T053 investigation: distance of each body from its own real-scale line, in its radii, on the build date / worst
+  before the next rebuild: planets 0.8–8.2 / 1.1–13.6 (256-point chord sag, then 021's 10-year refresh lets the
+  elements drift), moons ≤ 0.06 / ≤ 0.62 (the Moon). 2 048 points fix only the first part. Stopped for the lead.
+
+- T053 (lead chose rebuild-on-stray, D-038): planets' real lines 4 096 points; any real line rebuilt when its body
+  is > 0.25 radius off it (replaces D-027). ~0.1 ms/frame. 1027 unit, 48 Solar E2E green.
+
+- T060: selection E2E (9 tests). Fixed: the wide-screen info panel spilled over "Reset view" once it held the
+  card and list (grid rows); the phone-only rows rule moved to the base `.info`. 1027 unit, 186 E2E green.
+
+- T061: flying and following E2E (5 tests); a lit-side check that couldn't fail was replaced by the camera/Sun
+  angle plus a disc-middle check.
+
+- T062: labels, placement, time and lifecycle E2E (8 tests). 1027 unit, 199 E2E green.
+
+- T063: screenshots; fixed the phone sheet staying scrolled to the list after a selection. Observed: a body's own
+  orbit line crosses its disc in real-scale close-ups (correct geometry), reported. 1027 unit, 200 E2E green.
+
+**Next:** lead's call on own-line close-ups; T090–T092.
+**Blockers:** none
+
+## 2026-10-06 — 022-solar-system-surfaces ✔️ Implemented
 
 **Done:**
 
@@ -53,8 +122,10 @@ Newest first. One entry per working session.
 - T090–T091 (`/spec-verify 022`): docs updated; 902 unit + 177 E2E + build green; entry 147.9 KB; Space 3.06 MB; production gate-5 probe clean. AC-1–AC-12 ticked. AC-13 open: SwiftShader 53.5–56.5 fps at whole-system views (60.3 with the maps blocked: software texture sampling); 60 FPS on a mid-range laptop not yet measured. Spec stays In Progress; roadmap 🚧.
 
 - T092: AC-13 accepted on the SwiftShader floor by the lead (D-034); 13/13 ACs ticked; spec Implemented; roadmap 022 ✔️.
+- Committed `322b1b6` `feat(022): …` (not pushed: `origin/main` is at `601c597`, so 021 `bf0d3e4` and 022 are both
+  local only).
 
-**Next:** commit 022 when the lead asks; then `/spec-new` for 023 (selection & focus).
+**Next:** `/spec-new` for 023 (selection & focus); push 021 + 022 when the lead asks.
 **Blockers:** none
 
 ## 2026-10-06 — 021-orbital-mechanics ✔️ Implemented

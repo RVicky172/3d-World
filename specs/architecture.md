@@ -47,6 +47,7 @@ src/
       keyboard.ts         # keyAction() mapping; orbitStep/zoomStep/panStep (pure Spherical maths)
       turntable.ts        # idle auto-orbit state, advanced only by delta; hold() (012)
       turn.ts             # pure: easeTurn(), turnStep() — great-circle turn of a view direction (012)
+      fly.ts              # pure: flyPath() — van Wijk–Nuij zoom-and-pan between two views, ≤ 2 s (023)
       controls-ui.ts      # fading hint, "?" help disclosure, "Reset view" button
       types.ts            # CameraControlsConfig, CameraControlsOptions, CameraControls
     model-viewer/
@@ -73,18 +74,23 @@ src/
     fallback.ts           # WebGL2-unavailable screen (sets data-webgl="unavailable")
     context-lost.ts       # "The 3D view stopped" alert with a Reload button (005)
     loading.ts            # createLoadingIndicator(): "Loading <title>…", bar + % (011), "<title> loaded" announcer
-    info-panel.ts         # createInfoPanel(): the Space's title + description, collapsible region (012)
+    info-panel.ts         # createInfoPanel(): the Space's title + description, collapsible region (012); InfoSlot (023)
   spaces/
     registry.ts           # spaces[] with lazy loaders, findSpace()
     <space-id>/
       index.ts            # default-exports a SpaceFactory; scene data as a typed config object
       data.ts             # typed scene data (e.g. sheen-chair: ModelViewerConfig, incl. hotspots)
     solar-system/         # 020: the multi-object Space
-      data.ts             # BODIES (16, from JPL), SOURCES, REAL_UNIT_KM, STYLISED constants, SOLAR_SYSTEM view
-      types.ts            # BodyData, OrbitalElements, ScaleMode, BodyLayout, DataSource
+      data.ts             # BODIES (16, from JPL), SOURCES, REAL_UNIT_KM, STYLISED constants, SOLAR_SYSTEM view; FACTS (023)
+      types.ts            # BodyData, OrbitalElements, ScaleMode, BodyLayout, DataSource, BodyFacts (023)
       scale.ts            # pure: layout(bodies, mode), placeBodies(), worldPositions(), systemExtent()
       scene.ts            # buildSystem(): pivot groups + one shared sphere + Sun light; applyLayout()
-      markers.ts          # createBodyMarkers(): real-scale name labels, moon rule, declutter, nearest()
+      markers.ts          # createBodyMarkers(): name labels at both scales (dot under 3 px, D-037), moon rule,
+                          #   declutter, nearest(), selected state, hit() (023)
+      picking.ts          # pure: pick() — which body a click lands on: discs, 22 px reach, shown names (023)
+      focus.ts            # pure: framingDistance(), viewDirection(), clearArea(), viewOffset() (023)
+      facts.ts            # pure: factsFor(), massKg(), formatters, liveDistance() (023)
+      body-panel.ts       # createBodyPanel(): facts card + "Bodies" list + announcer in the info panel's slot (023)
       scale-toggle.ts     # createScaleToggle(): "True scale" button + polite scale description
       index.ts            # createSolarSystem(): ties them together; re-centring zoom; dynamic near/far
       surfaces.ts         # pure: longitudeOfU(), subPoint() — how the maps sit on the bodies (022)
@@ -110,7 +116,8 @@ tests/
   helpers/fakes.ts        # FakeScheduler, FakeVisibility, createFakeRenderer, createFakeContext
   unit/                   # Vitest, mirrors src/ (+ scripts/)
   e2e/                    # Playwright; fixtures.ts fails tests on console errors; subpath.spec.ts runs on /3d-World/
-                          # solar-helpers.ts: project(), snapshot() for the Solar System specs (020–022)
+                          # solar-helpers.ts: project(), snapshot(), cameraFrom() (view offset), waitForFly(),
+                          #   selectFromList() for the Solar System specs (020–023)
                           # workers capped at min(4, cores/4), override with E2E_WORKERS (D-015)
 public/
   assets/<space-id>/      # models, textures (licensed; see CREDITS.md)
@@ -146,12 +153,22 @@ export interface SpaceInstance {
   resize(width: number, height: number): void; // update camera aspect etc.; never called with 0
   render?(): void; // opt-in custom rendering (e.g. EffectComposer)
   focusTarget?(context: { previousSpaceId: string | null }): HTMLElement | null; // where focus lands on a switch (004 AC-13)
+  attachInfo?(slot: InfoSlot): void; // the info panel's slot for the Space's own content, after mounting (023)
+  selection?(): { id: string | null; flying: boolean; following: boolean }; // test seam (023)
   hotspotPositions?(): Array<{ id: string; world: [number, number, number] }>; // test seam (012 AC-6)
   bodies?(): Array<{ id; world; radius; quaternion? }>; // test seam (020; orientation 021)
   saveState?(): unknown; // carried across a context loss (021)
   simTime?(): { days: number; speed: number; playing: boolean }; // test seam (021)
   setSimTime?(days: number): void; // test seam (021)
   dispose(): void; // free GPU + DOM + listeners
+}
+
+export interface InfoSlot {
+  // spec 023
+  readonly content: HTMLElement; // empty element inside the panel's region, after the description
+  showDescription(show: boolean): void;
+  open(): void; // expand without recording the visitor's preference
+  onOpenChange(listener: (open: boolean) => void): void;
 }
 
 export type SpaceFactory = (ctx: SpaceContext) => Promise<SpaceInstance>;
@@ -391,8 +408,16 @@ label, config })` in its factory. It calls `controls.update(delta)` from `update
 - **`follow(delta)` (021, AC-10):** moves camera and target together by any `{ x, y, z }` (a reused vector, no
   per-frame allocation). Not an interaction: `userMoved` and the turntable are untouched. It doesn't call
   `update()` itself (that would flush the visitor's damping every frame); the frame's `update()` applies the limits.
+- **`flyTo(target, position, { minDistance?, instant? })` (023, AC-4):** a smooth zoom-and-pan to a new view
+  (`fly.ts`: van Wijk & Nuij 2003, target along a straight line, distance geometric, `r = −asinh(b)` against
+  cancellation at real scale; smoothstep time; duration min(2, 0.6 + 0.25·S) s). The direction turns with
+  `turnStep`, clamped to the polar limits. Advanced by `update(delta)`; instant under reduced motion or `instant`.
+  Any input, `reset()`, `reframe()`, `turnTo()` or another `flyTo()` cancels it where the last frame left the
+  camera. `follow()` shifts an active flight's ends, so it lands on a moving body. Landing restarts the
+  turntable's idle delay. `flying` reports it.
 - **Reset:** flush in-flight damping (one `update()` with damping off), then `OrbitControls.reset()` to the saved
-  initial state. Without the flush, the reset drifts.
+  initial state. Without the flush, the reset drifts. `reset()` (button, `R`) then calls the `onReset` option
+  (023: it clears a selection); `reframe()` does the same reset without `onReset` (a scale switch).
 - **UI (`ctx.overlay`):**
   - a hint, announced politely and dismissed after 4 s of Space time or on the first interaction;
   - a "?" disclosure (`aria-expanded`/`aria-controls`, Esc closes it and returns focus) listing mouse, touch and
@@ -459,7 +484,12 @@ SpaceManager mounts it), so a Space can't forget it.
 - **Remembered choice:** `main.ts` passes `open: readPreference('world.infoPanel.open', true)` and writes on
   toggle. `src/core/preferences.ts` stores JSON in `localStorage`, wrapped in try/catch; any failure falls back.
   The project's only `localStorage` use: a UI preference (Constitution II).
-- **Layout (CSS only):** above 640 px, a side panel top-right, `min(20rem, 40vw)` wide. At or below it, a bottom
+- **Slot (023):** the panel returns `slot` (`InfoSlot`): `content` (an element after the description),
+  `showDescription(show)`, `open()` (expands without `onToggle`, so the preference is untouched) and
+  `onOpenChange`. The manager hands it to `instance.attachInfo?.(slot)` right after mounting the panel.
+- **Layout (CSS only):** above 640 px, a side panel top-right, `min(20rem, 40vw)` wide. `.info` is a grid with
+  `grid-template-rows: auto minmax(0, 1fr)` at every width, so long content scrolls inside `max-height` instead of
+  spilling over the controls (023 T060). At or below it, a bottom
   sheet above the controls row (`bottom: 72px`, raised above a model credit with `.overlay:has(.model-credit)`,
   `max-height: 35vh`), and the controls hint moves to the top (AC-3). Only the toggle and card take pointer
   events, so the panel never moves the camera.
@@ -499,7 +529,8 @@ position, view }` in the Space's `data.ts`; `position` is in the model's own (gl
 
 Back link → 3D view (canvas) → info panel toggle → hotspot markers that aren't dimmed, in data order → the open
 annotation's Close → "?" → "Reset view" → the model credit's link. The Solar System puts "True scale" and its
-time controls between the info toggle and "?" (020–021). The core prepends the panel; the viewer adds
+time controls between the info toggle and "?" (020–021), and puts its facts card's Close and the "Bodies" list
+inside the panel, after the description (023). The core prepends the panel; the viewer adds
 the hotspot layer before the controls; the credit is appended last.
 
 ## Asset Pipeline (`npm run assets`, 011)
@@ -568,58 +599,61 @@ composers.
 
 ## Testability Seams
 
-| Seam                                | Real                                                       | In tests                                                                                                                          |
-| ----------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Time                                | `createClock()`                                            | `FakeClock`                                                                                                                       |
-| Frames                              | `requestAnimationFrame`                                    | `FakeScheduler.flush(now)`                                                                                                        |
-| Visibility                          | `document`                                                 | `FakeVisibility.set('hidden')`                                                                                                    |
-| Renderer (Engine)                   | `WebGLRenderer`                                            | `createFakeRenderer()` (`RendererLike`)                                                                                           |
-| Resize                              | `ResizeObserver`                                           | injected `watchResize` callback                                                                                                   |
-| Space context                       | built by `SpaceManager`                                    | `createFakeContext()`                                                                                                             |
-| Engine/Fader (Manager)              | `Engine`, `Fader`                                          | `ManagedEngine`, `Transition` fakes                                                                                               |
-| URL + history (Router)              | `window.location`, `window.history`, `window`              | `FakeBrowserLocation` (all three in one)                                                                                          |
-| Camera controls (unit)              | OrbitControls on the real canvas                           | real OrbitControls on a jsdom canvas; keyboard/wheel events; `FakeClock`-style deltas                                             |
-| Touch input (E2E)                   | fingers                                                    | `touchGesture()`: CDP `Input.dispatchTouchEvent` (Chromium)                                                                       |
-| Gallery (unit)                      | `createGalleryView` in `main.ts`                           | injected test registry; `createFakeContext()`                                                                                     |
-| Sub-path hosting (E2E)              | GitHub Pages `/3d-World/`                                  | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174                                                           |
-| Running app (E2E)                   | —                                                          | `window.__WORLD__` in `npm run build:test` builds                                                                                 |
-| Context loss                        | GPU/driver reset on the renderer's canvas                  | unit: `EventTarget` canvas + fake engine/manager; E2E: `__WORLD__.loseContext()`                                                  |
-| Motion preference                   | `matchMedia('(prefers-reduced-motion: reduce)')`           | unit: fake `MediaQueryList` (`EventTarget` + `matches`); E2E: `page.emulateMedia()`                                               |
-| No WebGL2 / no renderer (E2E)       | the browser                                                | init script patching `HTMLCanvasElement.prototype.getContext`                                                                     |
-| Model loading (unit)                | `createGltfLoader`, PMREM studio environment, BASE_URL     | `ModelViewerDeps`: stub `createLoader`, `createEnvironment`, `baseUrl`                                                            |
-| Loader parts (unit)                 | `FileLoader`, `KTX2Loader`, `GLTFLoader`, `MeshoptDecoder` | `LoaderParts` fakes passed to `createGltfLoader(renderer, parts)`                                                                 |
-| Download progress (E2E)             | a slow network                                             | CDP `Network.emulateNetworkConditions` + a MutationObserver log                                                                   |
-| Decoder workers (E2E)               | KTX2Loader's worker pool                                   | `page.workers()` / `page.on('worker')`                                                                                            |
-| Visual parity (E2E)                 | the original model                                         | `page.route` serving `assets-src/…`; `canvasRgba()` + `meanPixelDifference()`                                                     |
-| Slow / failed download (E2E)        | the network                                                | `page.route()` delaying or aborting the GLB, the transcoder, or serving a corrupt file                                            |
-| Framing and lighting (E2E)          | what the visitor sees                                      | `contentBounds()`: drawing-buffer bounds, fill of the smaller side, mean luminance                                                |
-| Preferences (unit)                  | `window.localStorage`                                      | an injected `Storage` (incl. one that throws)                                                                                     |
-| Marker placement (E2E)              | the hotspot module's own projection                        | `__WORLD__.hotspots()` + `cameraPose()` + `cameraProjection()`, projected with three in Node                                      |
-| Hotspot controls (unit)             | `turnTo` / `holdTurntable` of the shared controls          | `vi.fn()` controls; real camera and three meshes for occlusion                                                                    |
-| Solar system bodies (E2E)           | the Space's own drawing and markers                        | `__WORLD__.bodies()` + `cameraPose()` + `cameraProjection()`, projected with three in Node                                        |
-| Scale preference (unit)             | `window.localStorage`                                      | `memoryStorage()` (`tests/helpers/fakes.ts`) via `SolarSystemDeps.storage`                                                        |
-| Pointer events (unit)               | `PointerEvent`, pointer capture                            | `MouseEvent` with `pointerId`/`pointerType` defined; stubbed `setPointerCapture` (jsdom)                                          |
-| Touch re-centring (E2E)             | fingers landing on a marker                                | `touchGesture(page, fingers, 0)`: touch start and end, no moves                                                                   |
-| Wall clock (core, 021)              | `Date.now` passed to `SpaceManager({ wallClock })`         | a constant; `createFakeContext()` has `startTime` 2026-10-05                                                                      |
-| Simulated time (E2E, 021)           | the time controls and `update(delta)`                      | `__WORLD__.simTime()` / `setSimTime(days)`; speeds measured per second of Space time (rAF deltas clamped as the engine does, 022) |
-| Orbit accuracy (unit, 021)          | JPL ephemerides                                            | `tests/fixtures/horizons-positions.json` (dev-only `scripts/fetch-reference-positions.mjs`)                                       |
-| Moving markers (E2E, 021)           | markers and bodies in the same frame                       | camera, `bodies()` and marker dots read in one `page.evaluate`, projected in Node                                                 |
-| Imagery and stars (unit, 022)       | `createKtx2(renderer)`, `fetch`, BASE_URL                  | `SolarSystemDeps`: `createKtx2` (a stub whose loads finish on demand), `loadStars`, `baseUrl`                                     |
-| Shader patches (unit, 022)          | three compiling the program on the GPU                     | `onBeforeCompile` run on three's real `ShaderLib` sources (no WebGL): anchors, uniforms                                           |
-| Background content (E2E, 022)       | imagery arriving after the view is ready                   | `body[data-space-background="done"]` (`waitForBackground`)                                                                        |
-| One texture's effect (E2E, 022)     | the same view with and without a map                       | two pages on one camera pose and a fixed date, one with `page.route` answering 404; diffed                                        |
-| Slow image (E2E, 022)               | the network                                                | a `page.route` handler holding `route.continue()` until the test releases it                                                      |
-| Ring and shadow geometry (E2E, 022) | the shaders                                                | each pixel traced in Saturn's frame from `bodies()` (orientation) and the camera, in Node                                         |
+| Seam                                | Real                                                       | In tests                                                                                                                                    |
+| ----------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Time                                | `createClock()`                                            | `FakeClock`                                                                                                                                 |
+| Frames                              | `requestAnimationFrame`                                    | `FakeScheduler.flush(now)`                                                                                                                  |
+| Visibility                          | `document`                                                 | `FakeVisibility.set('hidden')`                                                                                                              |
+| Renderer (Engine)                   | `WebGLRenderer`                                            | `createFakeRenderer()` (`RendererLike`)                                                                                                     |
+| Resize                              | `ResizeObserver`                                           | injected `watchResize` callback                                                                                                             |
+| Space context                       | built by `SpaceManager`                                    | `createFakeContext()`                                                                                                                       |
+| Engine/Fader (Manager)              | `Engine`, `Fader`                                          | `ManagedEngine`, `Transition` fakes                                                                                                         |
+| URL + history (Router)              | `window.location`, `window.history`, `window`              | `FakeBrowserLocation` (all three in one)                                                                                                    |
+| Camera controls (unit)              | OrbitControls on the real canvas                           | real OrbitControls on a jsdom canvas; keyboard/wheel events; `FakeClock`-style deltas                                                       |
+| Touch input (E2E)                   | fingers                                                    | `touchGesture()`: CDP `Input.dispatchTouchEvent` (Chromium)                                                                                 |
+| Gallery (unit)                      | `createGalleryView` in `main.ts`                           | injected test registry; `createFakeContext()`                                                                                               |
+| Sub-path hosting (E2E)              | GitHub Pages `/3d-World/`                                  | Playwright `subpath` project: `VITE_BASE=/3d-World/` build on port 4174                                                                     |
+| Running app (E2E)                   | —                                                          | `window.__WORLD__` in `npm run build:test` builds                                                                                           |
+| Context loss                        | GPU/driver reset on the renderer's canvas                  | unit: `EventTarget` canvas + fake engine/manager; E2E: `__WORLD__.loseContext()`                                                            |
+| Motion preference                   | `matchMedia('(prefers-reduced-motion: reduce)')`           | unit: fake `MediaQueryList` (`EventTarget` + `matches`); E2E: `page.emulateMedia()`                                                         |
+| No WebGL2 / no renderer (E2E)       | the browser                                                | init script patching `HTMLCanvasElement.prototype.getContext`                                                                               |
+| Model loading (unit)                | `createGltfLoader`, PMREM studio environment, BASE_URL     | `ModelViewerDeps`: stub `createLoader`, `createEnvironment`, `baseUrl`                                                                      |
+| Loader parts (unit)                 | `FileLoader`, `KTX2Loader`, `GLTFLoader`, `MeshoptDecoder` | `LoaderParts` fakes passed to `createGltfLoader(renderer, parts)`                                                                           |
+| Download progress (E2E)             | a slow network                                             | CDP `Network.emulateNetworkConditions` + a MutationObserver log                                                                             |
+| Decoder workers (E2E)               | KTX2Loader's worker pool                                   | `page.workers()` / `page.on('worker')`                                                                                                      |
+| Visual parity (E2E)                 | the original model                                         | `page.route` serving `assets-src/…`; `canvasRgba()` + `meanPixelDifference()`                                                               |
+| Slow / failed download (E2E)        | the network                                                | `page.route()` delaying or aborting the GLB, the transcoder, or serving a corrupt file                                                      |
+| Framing and lighting (E2E)          | what the visitor sees                                      | `contentBounds()`: drawing-buffer bounds, fill of the smaller side, mean luminance                                                          |
+| Preferences (unit)                  | `window.localStorage`                                      | an injected `Storage` (incl. one that throws)                                                                                               |
+| Marker placement (E2E)              | the hotspot module's own projection                        | `__WORLD__.hotspots()` + `cameraPose()` + `cameraProjection()`, projected with three in Node                                                |
+| Hotspot controls (unit)             | `turnTo` / `holdTurntable` of the shared controls          | `vi.fn()` controls; real camera and three meshes for occlusion                                                                              |
+| Solar system bodies (E2E)           | the Space's own drawing and markers                        | `__WORLD__.bodies()` + `cameraPose()` + `cameraProjection()`, projected with three in Node                                                  |
+| Scale preference (unit)             | `window.localStorage`                                      | `memoryStorage()` (`tests/helpers/fakes.ts`) via `SolarSystemDeps.storage`                                                                  |
+| Pointer events (unit)               | `PointerEvent`, pointer capture                            | `MouseEvent` with `pointerId`/`pointerType` defined; stubbed `setPointerCapture` (jsdom)                                                    |
+| Touch re-centring (E2E)             | fingers landing on a marker                                | `touchGesture(page, fingers, 0)`: touch start and end, no moves                                                                             |
+| Wall clock (core, 021)              | `Date.now` passed to `SpaceManager({ wallClock })`         | a constant; `createFakeContext()` has `startTime` 2026-10-05                                                                                |
+| Simulated time (E2E, 021)           | the time controls and `update(delta)`                      | `__WORLD__.simTime()` / `setSimTime(days)`; speeds measured per second of Space time (rAF deltas clamped as the engine does, 022)           |
+| Orbit accuracy (unit, 021)          | JPL ephemerides                                            | `tests/fixtures/horizons-positions.json` (dev-only `scripts/fetch-reference-positions.mjs`)                                                 |
+| Moving markers (E2E, 021)           | markers and bodies in the same frame                       | camera, `bodies()` and marker dots read in one `page.evaluate`, projected in Node                                                           |
+| Imagery and stars (unit, 022)       | `createKtx2(renderer)`, `fetch`, BASE_URL                  | `SolarSystemDeps`: `createKtx2` (a stub whose loads finish on demand), `loadStars`, `baseUrl`                                               |
+| Shader patches (unit, 022)          | three compiling the program on the GPU                     | `onBeforeCompile` run on three's real `ShaderLib` sources (no WebGL): anchors, uniforms                                                     |
+| Background content (E2E, 022)       | imagery arriving after the view is ready                   | `body[data-space-background="done"]` (`waitForBackground`)                                                                                  |
+| One texture's effect (E2E, 022)     | the same view with and without a map                       | two pages on one camera pose and a fixed date, one with `page.route` answering 404; diffed                                                  |
+| Slow image (E2E, 022)               | the network                                                | a `page.route` handler holding `route.continue()` until the test releases it                                                                |
+| Ring and shadow geometry (E2E, 022) | the shaders                                                | each pixel traced in Saturn's frame from `bodies()` (orientation) and the camera, in Node                                                   |
+| Selection (unit, 023)               | the core's info panel                                      | a fake `InfoSlot` passed to `attachInfo`; pointer events with `pointerType`/`button`                                                        |
+| Selection (E2E, 023)                | flights, follow, view offset                               | `__WORLD__.selection()`, `cameraProjection().view` (applied by `cameraFrom`), `waitForFly`; flight length in Space time from `simTime` days |
 
 `window.__WORLD__` provides `open`, `close`, `navigate`, `activeId`, `memory`, `cameraAspect`, `cameraPose`,
-`cameraProjection`, `hotspots`, `bodies`, `simTime` / `setSimTime` (021), and `loseContext` / `restoreContext` (three's `forceContextLoss/Restore`; restore only after `data-webgl="lost"`). It is installed behind a
+`cameraProjection` (with the view offset as `view`, 023), `hotspots`, `bodies`, `simTime` / `setSimTime` (021),
+`selection` (023), and `loseContext` / `restoreContext` (three's `forceContextLoss/Restore`; restore only after `data-webgl="lost"`). It is installed behind a
 literal `import.meta.env.MODE !== 'production'` check, so production bundles drop it. `npm run build` verifies this.
 
-## Solar System (`src/spaces/solar-system/`, 020–022)
+## Solar System (`src/spaces/solar-system/`, 020–023)
 
 The first multi-object Space: the Sun, eight planets and the seven moons ≥ 1 000 km (D-022), stylised or true to
 scale, moving on their orbits as a simulated clock runs (021), with real surfaces, Saturn's rings, the night sky
-and a glowing Sun (022). 023 adds selection and facts.
+and a glowing Sun (022), and the visitor can select any body to fly to it and read its facts (023).
 
 - **Data (`data.ts`):** 16 `BodyData` records copied from JPL (Horizons physical data, planetary physical
   parameters, J2000 approximate elements, satellite mean elements; NSSDC was unreachable), each with its source
@@ -658,10 +692,16 @@ and a glowing Sun (022). 023 adds selection and facts.
   - **Switching scale:** `applyLayout()` only moves groups and rescales meshes.
   - **Per date (021):** `applyPositions(offsets)` (then world matrices) and `applyOrientations(days, speed)`.
   - **Light:** ambient 0.1 (D-028), so a planet seen on its night side against black still shows.
-- **Orbit lines (`orbit-lines.ts`, 021, AC-11):** 15 `LineLoop`s per scale (256 points, one shared faint material,
-  no depth write, `raycast` a no-op), prebuilt and toggled by visibility. Planet lines hang off `system`, moon lines
-  off their planet's orbit group. Real ellipses are rewritten in place after 10 years (planets) or 1 % of the moon's
-  fastest precession (D-027: the Moon every ~22 days).
+- **Orbit lines (`orbit-lines.ts`, 021, AC-11):** 15 `LineLoop`s per scale (one shared faint material, no depth
+  write, `raycast` a no-op), prebuilt and toggled by visibility. Planet lines hang off `system`, moon lines off
+  their planet's orbit group. 256 points each, except planets' real lines: 4 096 (023, D-038: straight segments
+  sag < 1/8 of the planet's radius). A real line is rewritten in place on any new date where its body is more
+  than 0.25 of its radius from it (exact point-to-polyline check, no allocation, ~0.1 ms/frame), which replaced
+  021's fixed intervals (D-027). Each planet's real line also has a 256-point far copy (`<id>-path-real-far`,
+  every 16th fine vertex, rewritten with it); `setView(eye, pixelAngle)`, every frame after the camera matrix,
+  draws the fine line only where the copy's worst chord sag would show as ≥ 0.5 CSS px, else the copy (D-040:
+  32 000 segments cost SwiftShader ~10 fps at the whole-system view). A body's own line still passes through it,
+  so in a close-up its near half crosses the disc (correct; left for 030).
 - **The Space (`index.ts`):**
   - **Scale choice:** remembered in `localStorage` (`world.solarSystem.scale`, stylised by default).
   - **Switching:** re-layout, orbit lines swapped, bodies re-placed, markers on or off, then `setHome()` +
@@ -682,8 +722,12 @@ and a glowing Sun (022). 023 adds selection and facts.
 - **Re-centring zoom (D-023):** at real scale, a `wheel` (capture phase, before OrbitControls) or a pinch's
   second touch-down within 24 px of a body calls `focusOn(body, { minDistance: 1.2 r })`. Zoom speed 4. A moving
   pinch also pans by its midpoint, as two-finger gestures do.
-- **Real-scale markers (`markers.ts`, AC-8a):** an `aria-hidden` layer of labels (dot + name) that lets
-  pointer events through.
+- **Name labels (`markers.ts`, 020 AC-8a; both scales since 023 AC-14):** an `aria-hidden` layer of labels
+  that lets pointer events through.
+  - **Dot or disc (D-037):** from each body's projected radius (`radiusOf`), under 3 px a dot with the name 7 px
+    out; from 3 px no dot (`is-disc`) and the name `radius + 4` px out (`--name-offset`).
+  - **Selected (023):** `.is-selected`, first in the declutter order, so its name always shows. `hit(x, y)` runs
+    `pick()` over this frame's discs, depths and shown name boxes.
   - **Placement:** projected with `toScreen()`; written only when something changed. Re-projection is skipped
     while the camera is unchanged, so the Space calls `invalidate()` whenever bodies move (021).
   - **Moons:** hidden within 24 px of their planet's marker.
@@ -698,8 +742,25 @@ and a glowing Sun (022). 023 adds selection and facts.
   visually hidden polite region for play/pause, direction and range limits. `set()` shows state silently.
   "True scale" and the time controls share a `.solar-bar` row (bottom-left; at ≤ 640 px it wraps above the
   controls bar and the info sheet is lifted to 180 px).
-- **Tab order:** back link → 3D view → info toggle → "True scale" → Play/Pause → Speed → Backwards → "?" →
-  "Reset view".
+- **Selection (023, plan §1–§12):**
+  - **Ways in:** a click on the canvas (one primary pointer, ≤ 5 px of travel, no second pointer) → `markers.hit()`;
+    a button in the panel's "Bodies" list; a restore after a context loss (`saveState()` has `selected`; applied
+    instantly on the first `resize`). Ways out: Escape (capture phase on the overlay, skipped while "?" is open),
+    the card's Close, `onReset`. Focus returns to the opener (the list button, or the 3D view after a click).
+  - **Select:** label and list button marked, card shown (`body-panel.ts`: `factsFor`, live distance from
+    `liveDistance` on each new time state), description hidden, panel opened, turntable held; `flyTo` the end pose
+    (`focus.ts`: the disc a third of the clear area's shorter side, from 40° round and 20° above the sunward
+    direction), then 021's follow (its check waits while a flight is under way).
+  - **Clear area:** the panel's region rect → `clearArea` → `camera.setViewOffset` so the target is drawn at the
+    centre of what the panel leaves (eased in 0.6 s, out 0.3 s; instant under reduced motion; re-aimed on resize
+    and panel toggle).
+  - **Scale switch:** `reframe()`, then the selected body's end pose at the new scale, instantly, still followed.
+  - **Not touched:** the clock (speed, direction, play state) and the remembered preferences.
+- **Facts (`data.ts` `FACTS`, `facts.ts`):** descriptions and planets' known-moon counts are the only stored
+  facts; diameter, mass (GM ÷ G), average distance, day (sidereal), year/orbit and tilt come from `BODIES`. The
+  Sun's card has no distance or year (D-036). Fixed English formatting, metric.
+- **Tab order:** back link → 3D view → info toggle → [card Close] → "Bodies" buttons → "True scale" → Play/Pause →
+  Speed → Backwards → "?" → "Reset view".
 - **Surfaces (022):**
   - **Imagery data:** every body has an `imagery` map (KTX2, equirectangular, 0° longitude at the centre, east to
     the right); Earth has `layers` (clouds, night lights, ocean mask) and Saturn `rings` (74 490–136 780 km, PDS
@@ -729,10 +790,17 @@ and a glowing Sun (022). 023 adds selection and facts.
     px at the Sun's distance).
   - **Per frame (adds to 021's order):** fades advance by `delta`; after the camera's matrices, Earth's and
     Saturn's Sun uniforms and the glow's size.
-- **Budget:** code 45.5 KB gzipped (021: 17.3; `KTX2Loader` is most of the growth) + imagery and stars 2.46 MB +
-  the shared Basis decoder 571 KB = 3.06 MB (D-030 cap 4 MB); entry 147.9 KB (020 +0.5, 021 +0.1, 022 +1.3).
+- **Budget:** code 51.2 KB gzipped (021: 17.3, 022: 45.5; `KTX2Loader` is most of 022's growth) + imagery and
+  stars 2.46 MB + the shared Basis decoder 571 KB = 3.06 MB (D-030 cap 4 MB); entry 148.0 KB (020 +0.5, 021 +0.1,
+  022 +1.3, 023 +0.1).
 
-## Multi-Object Pattern (planned, 023)
+## Multi-Object Pattern (020–023)
 
-- 022 added textures, Saturn's rings, the starfield background and the Sun's glow (see Solar System above); 023
-  adds selection and flying to a body (it may reuse `focusOn`).
+What the Solar System established for Spaces with many objects:
+
+- **Data first:** every object and fact in typed, sourced data; render code derives the rest (Constitution VII).
+- **Two scales, one scene graph:** layouts switch by moving and rescaling, never rebuilding (020).
+- **Time as state:** a simulated clock moved only by `delta`, saved across a context loss (021).
+- **Labels as DOM:** one projected layer, written only on change, decluttered by size (020, 023).
+- **Selection:** pick from projections (not raycasts), fly with the shared controls' `flyTo`, follow with
+  `follow()`, show content through the info panel's `InfoSlot` (023).

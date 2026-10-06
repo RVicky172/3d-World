@@ -3,7 +3,7 @@
 > Phased plan. Each phase is a set of feature specs. Update statuses as work moves.
 > Status legend: ⬜ Not started · 📝 Spec drafted · ✅ Spec approved · 🚧 In progress · ✔️ Done
 
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-06
 
 ---
 
@@ -44,22 +44,24 @@ _Goal: the "one object, many angles" experience._
 
 ## Phase 3 — Multi-Object Space: Solar System
 
-_Goal: many objects in one shared world, animated together._
+_Goal: many objects in one shared world, animated together._ **Complete (2026-10-06).**
 
 | #   | Feature                                                                                            | Spec                                 | Status |
 | --- | -------------------------------------------------------------------------------------------------- | ------------------------------------ | ------ |
 | 020 | Solar system data model (Sun, 8 planets, major moons) with stylised + real scale modes             | `features/020-solar-system-data`     | ✔️     |
 | 021 | Orbital mechanics: circular → Keplerian orbits, axial tilt, rotation; time controls (pause, speed) | `features/021-orbital-mechanics`     | ✔️     |
 | 022 | Planet textures, Saturn rings, starfield background, Sun glow                                      | `features/022-solar-system-surfaces` | ✔️     |
-| 023 | Selection & focus: click a planet to fly the camera to it, show facts                              | —                                    | ⬜     |
+| 023 | Selection & focus: click a planet to fly the camera to it, show facts                              | `features/023-selection-focus`       | ✔️     |
 
 ## Phase 4 — Polish & Launch
 
-| #   | Feature                                                                  | Spec | Status |
-| --- | ------------------------------------------------------------------------ | ---- | ------ |
-| 030 | Performance pass: LOD, instancing, budgets enforced in CI                | —    | ⬜     |
-| 031 | Accessibility audit & keyboard tour                                      | —    | ⬜     |
-| 032 | Static deployment (GitHub Pages / Netlify / Vercel static) + CI workflow | —    | ⬜     |
+| #   | Feature                                                   | Spec | Status |
+| --- | --------------------------------------------------------- | ---- | ------ |
+| 030 | Performance pass: LOD, instancing, budgets enforced in CI | —    | ⬜     |
+
+_030 notes: revisit texture cost on real hardware (D-034); consider fading a body's own orbit line in real-scale close-ups (D-039)._
+| 031 | Accessibility audit & keyboard tour | — | ⬜ |
+| 032 | Static deployment (GitHub Pages / Netlify / Vercel static) + CI workflow | — | ⬜ |
 
 ## Backlog (unscheduled ideas)
 

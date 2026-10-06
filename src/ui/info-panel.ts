@@ -1,6 +1,10 @@
+import type { InfoSlot } from '../core/types';
+
 let panels = 0;
 
 export interface InfoPanel {
+  /** Where the Space adds its own content (spec 023). */
+  slot: InfoSlot;
   dispose(): void;
 }
 
@@ -35,8 +39,12 @@ export function createInfoPanel(
   region.setAttribute('aria-labelledby', heading.id);
   const description = document.createElement('p');
   description.textContent = info.description;
-  region.append(heading, description);
+  const content = document.createElement('div');
+  content.className = 'info-space';
+  region.append(heading, description, content);
 
+  const listeners: Array<(open: boolean) => void> = [];
+  const isOpen = () => toggle.getAttribute('aria-expanded') === 'true';
   const setOpen = (open: boolean) => {
     toggle.setAttribute('aria-expanded', String(open));
     toggle.textContent = open ? 'Hide info' : `About ${info.title}`;
@@ -44,14 +52,30 @@ export function createInfoPanel(
     root.dataset.open = String(open);
   };
   setOpen(options.open);
+  const changed = (open: boolean) => listeners.forEach((listener) => listener(open));
 
   toggle.addEventListener('click', () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    const open = !isOpen();
     setOpen(open);
     options.onToggle?.(open);
+    changed(open);
   });
 
   root.append(toggle, region);
   overlay.prepend(root);
-  return { dispose: () => root.remove() };
+  return {
+    slot: {
+      content,
+      showDescription: (show) => {
+        description.hidden = !show;
+      },
+      open: () => {
+        if (isOpen()) return;
+        setOpen(true);
+        changed(true);
+      },
+      onOpenChange: (listener) => listeners.push(listener),
+    },
+    dispose: () => root.remove(),
+  };
 }

@@ -541,6 +541,9 @@ body[data-view='gallery'] .back-to-gallery {
   gap: 8px;
   width: min(20rem, 40vw);
   max-height: calc(100% - 112px);
+  /* The region's row may shrink, so long content (023's facts and body list) scrolls inside the panel instead of
+     spilling past max-height over the controls below. */
+  grid-template-rows: auto minmax(0, 1fr);
   pointer-events: none;
   /* Above hotspot markers (a point behind the sheet shouldn't sit on its text); below an open annotation. */
   z-index: 1;
@@ -595,6 +598,112 @@ body[data-view='gallery'] .back-to-gallery {
   line-height: 1.45;
 }
 
+/* The Solar System's part of the panel (spec 023): the selected body's facts, then the list of bodies. */
+.body-card {
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.body-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.body-card h3,
+.body-list-heading {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.body-card-close,
+.body-list button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.body-card-close:hover,
+.body-list button:hover {
+  border-color: var(--accent);
+}
+
+.body-card-close:focus-visible,
+.body-list button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.info-panel .body-card-description {
+  margin: 6px 0 8px;
+}
+
+.body-card-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.body-card-facts dt {
+  color: var(--muted);
+}
+
+.body-card-facts dd {
+  margin: 0;
+}
+
+.info-panel .body-card-live {
+  margin-top: 6px;
+  font-size: 0.85rem;
+}
+
+.body-list-heading {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.body-list,
+.body-list ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A planet and its moons stay together: the moons follow it inline, after a divider. Items keep their list
+   semantics (no display: contents, which some browsers drop from the accessibility tree). */
+.body-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.body-list ul {
+  margin: 0;
+  padding-left: 6px;
+  border-left: 2px solid var(--border);
+}
+
+.body-list button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
+
 @media (max-width: 640px) {
   .info {
     top: auto;
@@ -602,7 +711,6 @@ body[data-view='gallery'] .back-to-gallery {
     left: 16px;
     width: auto;
     max-height: 35vh;
-    grid-template-rows: auto minmax(0, 1fr);
   }
 
   /* The bottom sheet takes the hint's place, so the hint moves below the back link. */
@@ -877,8 +985,9 @@ body[data-view='gallery'] .back-to-gallery {
   position: absolute;
   top: 0;
   left: 0;
-  /* The label sits just right of the body; the dot is centred on it. */
-  padding-left: 10px;
+  /* The label sits just right of the body; the dot is centred on it. --name-offset is the name's distance from
+     the body's centre: 7 px beside a dot, or just outside a disc drawn 3 px or larger (D-037). */
+  padding-left: calc(var(--name-offset, 7px) + 3px);
   color: var(--fg);
   font-size: 0.8rem;
   line-height: 1;
@@ -904,7 +1013,7 @@ body[data-view='gallery'] .back-to-gallery {
 
 /* Near the right edge the name sits left of its dot (D-024). */
 .body-marker.is-left {
-  padding-right: 10px;
+  padding-right: calc(var(--name-offset, 7px) + 3px);
   padding-left: 0;
   translate: calc(-100% + 3px) -0.5em;
 }
@@ -912,4 +1021,21 @@ body[data-view='gallery'] .back-to-gallery {
 .body-marker.is-left .body-marker-dot {
   right: 0;
   left: auto;
+}
+
+/* A body drawn as a disc needs no dot: its name sits beside the disc (D-037). */
+.body-marker.is-disc .body-marker-dot {
+  display: none;
+}
+
+/* The selected body (spec 023, AC-3). */
+.body-marker.is-selected {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.body-marker.is-selected .body-marker-dot {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--accent);
 }

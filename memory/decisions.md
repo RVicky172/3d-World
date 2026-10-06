@@ -327,3 +327,52 @@ T062 can wait on the same signal.
 **Decision (project lead):** accept the SwiftShader result as AC-13's frame-rate evidence and close 022.
 **Alternatives:** measure on a mid-range laptop first; optimise for the software floor (anisotropy 1, smaller distant maps); leave 022 open.
 **Consequences:** AC-13 ticked with this note; 022 Implemented. 030 (performance pass) is the place to revisit texture cost (e.g. anisotropy, LOD) and to measure on real hardware.
+
+## D-035 — 023 selection & focus: open questions resolved (2026-10-06)
+
+**Context:** 023's draft spec left Q1–Q13 open (hit targets, body list, fly, facts, labels, budget).
+**Decision (project lead):** accept every drafted proposal: click the body with a ≥ 44 px hit area; a body list in the info panel; an eased fly ≤ 2 s ending with the body ≈ ⅓ of the shorter side from its sunlit side; the selection survives a scale switch; seven facts plus a description, metric with "× Earth" for diameter and mass; live distance from the Sun (a moon's from its planet); the facts replace the Space description in the info panel; closing leaves the camera where it is ("Reset view" goes home); stylised labels always shown with 020's declutter; time keeps running; ≤ 5 KB entry growth; no deep links.
+**Alternatives:** labels as the only targets; a separate floating card; flying home on close; pausing time on select; deep links.
+**Consequences:** Spec Approved; the plan builds on 012's panel, 020's marker layer and 021's follow.
+
+## D-036 — 023 plan approved: fly path, clear area, facts details (2026-10-06)
+
+**Context:** 023 plan review; three review points (the Sun's card, "length of day", re-centre vs selection).
+**Decision (project lead):** plan approved as drafted: van Wijk–Nuij zoom-and-pan fly in the shared controls (`flyTo`, ≤ 2 s, `follow()` shifts it), body framed in the area the info panel leaves clear via `camera.setViewOffset`, facts derived from 020's data except descriptions and moon counts, an `InfoSlot` seam from the core's panel (`SpaceInstance.attachInfo`), controls `onReset`. The Sun's card omits distance and year; "day" is the sidereal rotation (no solar-day data); a real-scale re-centre on another body keeps the selection and only moves the follow.
+**Alternatives:** "not applicable" rows for the Sun; adding NASA's solar day; re-centre clearing or switching the selection; a target offset instead of a view offset.
+**Consequences:** `__WORLD__.cameraProjection()` gains the view offset so E2E projections stay correct. Spec AC-9 notes the Sun and the sidereal day.
+
+## D-037 — 023 labels: one dot/name rule at both scales; denser real-scale orbit lines (2026-10-06)
+
+**Context:** 023 T001 spike (real-scale close-ups with a view offset). Two existing behaviours look wrong close up: the real-scale marker (dot + name, built for sub-pixel bodies) prints on top of a close-up body's disc; and a straight segment of a planet's 256-point real-scale orbit line sits up to ~0.011 units inside the ellipse (~6 Moon radii on Earth's orbit), so it can cross a close-up body.
+**Decision (project lead):** markers follow one rule at both scales: below 3 px on-screen radius, 020's dot with the name 7 px from the centre; from 3 px, no dot and the name `radius + 4` px from the centre. Planets' real-scale orbit lines get 2 048 points (sag ~1.8 × 10⁻⁴ units); moons' and stylised lines keep 256.
+**Alternatives:** keep real-scale markers as they are and hide only the selected body's; fade orbit lines near the camera (shader change); hide the selected body's and its parent's lines while close.
+**Consequences:** Plan §10 and new §10a; T033 updated, T053 added. ~14 000 more line vertices, built once. 020 AC-8a's tests are unaffected (sub-pixel bodies keep their dot within 4 px).
+
+## D-038 — Real-scale orbit lines: 4 096 points for planets, rebuilt when the body strays (2026-10-06)
+
+**Context:** 023 T053. Measuring each body's distance from its own real-scale line (in its radii) showed D-037's 2 048 points weren't enough: on the build date planets were 0.8–8.2 radii off (256-point chords), and 021's fixed refresh (D-027: planets every 10 years, moons after 1 % of their precession) let the elements drift up to 13.6 radii (Neptune) and 0.62 for the Moon before a rebuild. A close-up could show a body's own line crossing it.
+**Decision (project lead):** planets' real lines get 4 096 points (2 048 left Uranus's chords at 0.15 radius); a real line is rebuilt, in place, on any new date where its body is more than 0.25 of its radius from it (an exact point-to-polyline check, no allocation). This replaces D-027's fixed intervals and D-037's 2 048.
+**Alternatives:** 2 048 points only; hiding the selected body's lines while selected; faster fixed intervals.
+**Consequences:** Every body stays within 0.25 radius of its own line at any speed, backwards or after a date jump (unit-tested over 20 years for planets and a year of daily steps for moons); straight segments sag < 1/8 radius, so a fresh line never re-triggers. The check costs ~0.1 ms per frame while time runs (incl. rebuilds; Node timing). ~32 000 planet line vertices, built once.
+
+## D-039 — A body's own orbit line in a real-scale close-up: left as is (2026-10-06)
+
+**Context:** 023 T063. In a real-scale close-up of a selected body, its own orbit line passes through it (within 0.25 radius, D-038) and the half nearer the camera crosses the disc. The geometry is correct, but it distracts; no AC covers it.
+**Decision (project lead):** no change in 023; noted for 030 (performance and polish).
+**Alternatives:** fade the body's own line when the camera is within ~20 of its radii; hide it while selected.
+**Consequences:** Roadmap 030 carries the note; architecture's orbit-lines entry says so.
+
+## D-040 — Real-scale planet lines: a 256-point far copy, the 4 096-point line only up close (2026-10-06)
+
+**Context:** 023 T091. On SwiftShader (the E2E renderer and AC-17's floor), D-038's 4 096-point planet lines
+(~32 000 segments) cut the real-scale whole-system view from 44–50 fps (022, same session) to 35–39, and the flight
+to Neptune to 47. By elimination the cost is drawing the segments, not the per-frame stray check, labels or panel.
+**Decision (project lead):** each planet's real line also gets a 256-point far copy (every 16th vertex of the fine
+line, so the same date and points). Every frame the fine line is drawn only when the far copy's worst chord sag,
+seen from the camera's distance to that copy, would be at least 0.5 CSS px; otherwise the far copy is drawn. The
+stray check and rebuilds stay on the fine line (both rewritten together). Moons and stylised lines unchanged.
+**Alternatives:** accept the SwiftShader result (as D-034); fewer points (fails D-038's sag bound); hide the lines.
+**Consequences:** D-038's close-up accuracy is kept; a whole-system view draws 256-point planet lines again. The
+swap is at most a 0.5 px change. ~2 000 segment-distance checks per frame (8 × 256). `OrbitLines` gains
+`setView(eye, pixelAngle)` and `coarse(id)`. T054 implements it; T091 re-measures.

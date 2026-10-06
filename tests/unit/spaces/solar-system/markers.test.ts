@@ -20,6 +20,8 @@ describe('createBodyMarkers', () => {
   let camera: PerspectiveCamera;
   let positions: Map<string, Vector3>;
   let markers: BodyMarkers;
+  /** World radii for the D-037 rule (spec 023); absent = every body sub-pixel, as 020's real scale. */
+  let radii: Map<string, number> | null;
 
   const moveCamera = (z: number) => {
     camera.position.set(0, 0, z);
@@ -27,7 +29,13 @@ describe('createBodyMarkers', () => {
     camera.updateMatrixWorld();
   };
   const create = (active = true) => {
-    markers = createBodyMarkers({ overlay, camera, bodies: BODIES, worldOf: (id) => positions.get(id)! });
+    markers = createBodyMarkers({
+      overlay,
+      camera,
+      bodies: BODIES,
+      worldOf: (id) => positions.get(id)!,
+      ...(radii ? { radiusOf: (id: string) => radii!.get(id) ?? 0 } : {}),
+    });
     markers.resize(SIZE, SIZE);
     markers.setActive(active);
     markers.update();
@@ -47,6 +55,7 @@ describe('createBodyMarkers', () => {
     overlay = document.createElement('div');
     document.body.replaceChildren(overlay);
     camera = new PerspectiveCamera(90, 1, 0.1, 100);
+    radii = null;
     moveCamera(10);
     positions = new Map([
       ['sun', new Vector3(0, 0, 0)],
@@ -185,6 +194,116 @@ describe('createBodyMarkers', () => {
     } finally {
       style.remove();
     }
+  });
+
+  describe('both scales: dot or name beside the disc (spec 023, AC-14, D-037)', () => {
+    const offset = (id: string) => marker(id).style.getPropertyValue('--name-offset');
+
+    it('below 3 px on screen a body keeps its dot, its name 7 px out', () => {
+      radii = new Map([
+        ['sun', 0.1],
+        ['earth', 0.1],
+        ['moon', 0.01],
+      ]); // 2 px at depth 10
+      create();
+      expect(marker('sun').classList.contains('is-disc')).toBe(false);
+      expect(offset('sun')).toBe('7px');
+    });
+
+    it('from 3 px a body has no dot and its name sits radius + 4 px from the centre', () => {
+      radii = new Map([
+        ['sun', 1],
+        ['earth', 0.1],
+        ['moon', 0.01],
+      ]); // the Sun: 20 px
+      create();
+      expect(marker('sun').classList.contains('is-disc')).toBe(true);
+      expect(offset('sun')).toBe('24px');
+      expect(marker('earth').classList.contains('is-disc')).toBe(false);
+      moveCamera(2); // Earth now 0.1 units at depth ~2: ~10 px
+      markers.update();
+      expect(marker('earth').classList.contains('is-disc')).toBe(true);
+    });
+
+    it('the CSS hides the dot of a disc and keeps the layer click-through', () => {
+      const style = document.createElement('style');
+      style.textContent = readFileSync('src/styles/main.css', 'utf8');
+      document.head.append(style);
+      try {
+        radii = new Map([['sun', 1]]);
+        create();
+        expect(getComputedStyle(dot('sun')!).display).toBe('none');
+        expect(getComputedStyle(dot('earth')!).display).not.toBe('none');
+        expect(getComputedStyle(marker('sun')).pointerEvents).toBe('none');
+      } finally {
+        style.remove();
+      }
+    });
+
+    it('the declutter uses the pushed-out name boxes', () => {
+      // The Sun's disc is 60 px; Earth 70 px right of it. With the name at 64 px out, "Sun" now overlaps Earth's.
+      radii = new Map([
+        ['sun', 3],
+        ['earth', 0.01],
+        ['moon', 0.001],
+      ]);
+      positions.set('earth', new Vector3(3.5, 0, 0)); // x = 270
+      positions.set('moon', new Vector3(9, 9, 0));
+      create();
+      expect(name('sun').hidden).toBe(false);
+      expect(name('earth').hidden).toBe(true);
+    });
+  });
+
+  describe('selection (spec 023, AC-3)', () => {
+    it('marks the selected body, one at a time', () => {
+      create();
+      markers.setSelected('earth');
+      markers.update();
+      expect(marker('earth').classList.contains('is-selected')).toBe(true);
+      markers.setSelected('sun');
+      markers.update();
+      expect(marker('earth').classList.contains('is-selected')).toBe(false);
+      expect(marker('sun').classList.contains('is-selected')).toBe(true);
+      markers.setSelected(null);
+      markers.update();
+      expect(overlay.querySelectorAll('.is-selected')).toHaveLength(0);
+    });
+
+    it('the selected body keeps its name over a larger neighbour', () => {
+      positions.set('earth', new Vector3(0.5, 0, 0)); // "Sun" runs over Earth
+      create();
+      expect(name('earth').hidden).toBe(true);
+      markers.setSelected('earth');
+      markers.update(); // a selection change redraws even with a still camera
+      expect(name('earth').hidden).toBe(false);
+      expect(name('sun').hidden).toBe(true);
+    });
+  });
+
+  describe('hit() (spec 023, AC-1)', () => {
+    it('picks by disc, 22 px reach and shown names; null while inactive', () => {
+      radii = new Map([
+        ['sun', 3],
+        ['earth', 0.01],
+        ['moon', 0.001],
+      ]); // the Sun: 60 px
+      positions.set('earth', new Vector3(-8, 0, 0)); // x = 40
+      create();
+      expect(markers.hit(250, 200)).toBe('sun'); // inside its disc
+      expect(markers.hit(60, 200)).toBe('earth'); // 20 px from its centre
+      // On the Sun's name: it starts 64 px right of the centre (x 264), beyond the disc and its reach.
+      expect(markers.hit(270, 200)).toBe('sun');
+      expect(markers.hit(120, 120)).toBeNull();
+      markers.setActive(false);
+      expect(markers.hit(250, 200)).toBeNull();
+    });
+
+    it('never picks a hidden marker (a moon tucked into its planet)', () => {
+      create();
+      expect(marker('moon').hidden).toBe(true);
+      expect(markers.hit(310, 200)).toBe('earth');
+    });
   });
 
   it('dispose() removes the layer (AC-12)', () => {

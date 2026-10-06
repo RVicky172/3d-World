@@ -154,3 +154,5 @@ All resolved by the project lead on 2026-10-06 (D-029):
 - 2026-10-06 — Content notes: ring radii also given in mean radii (the drawn sphere), 1.28–2.35 (T020).
 - 2026-10-06 — AC-1's E2E note: all 16 differ from their plain colour; the detail check excludes Uranus and Neptune, whose maps are near-featureless (T060, D-033).
 - 2026-10-06 — AC-13's frame rate settled on the software floor: SwiftShader 53.5–56.5 fps at the whole-system views with time running (60 with the maps blocked; software texture sampling), accepted by the lead (D-034). Implemented.
+- 2026-10-06 — Implemented: all 13 ACs verified (902 unit + 177 E2E; entry 147.9 KB, +1.3 of 5; Space 3.06 MB of 4:
+  code 45.5 KB + imagery and stars 2.46 MB + decoder 571 KB). D-029–D-034. Committed `322b1b6`.

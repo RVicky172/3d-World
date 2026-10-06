@@ -195,7 +195,7 @@ test.describe('real scale, with reduced motion', () => {
     }) => {
       await page.setViewportSize({ width, height });
       await gotoSpace(page, ID);
-      await expect(page.locator('.body-markers')).toBeHidden(); // stylised: none
+      await expect(page.locator('.body-markers')).toBeVisible(); // stylised too since spec 023 (AC-14)
       await toggle(page).click();
       await frames(page);
       const view = await project(page);

@@ -44,12 +44,20 @@ export interface CameraControlsOptions {
   /** Space title, used in the 3D view's accessible name. */
   label: string;
   config: CameraControlsConfig;
+  /**
+   * The visitor asked for the home view: "Reset view", the `R` key or `reset()` (spec 023: it clears a selection).
+   * Not called by `reframe()` or `setHome()`.
+   */
+  onReset?(): void;
 }
 
 export interface CameraControls {
   /** Call once per frame from `SpaceInstance.update` with the frame's delta. */
   update(deltaSeconds: number): void;
+  /** Returns to the home view (spec 004, AC-5) and calls `onReset`. */
   reset(): void;
+  /** Returns to the home view like `reset()`, without calling `onReset` (e.g. a scale switch re-framing, 023). */
+  reframe(): void;
   readonly turntableActive: boolean;
   /** Current focus point (moves when panning). Read-only for callers. */
   readonly target: Readonly<Vector3>;
@@ -81,5 +89,20 @@ export interface CameraControls {
    * Takes any `{ x, y, z }` so a caller can reuse one vector per frame.
    */
   follow(delta: { readonly x: number; readonly y: number; readonly z: number }): void;
+  /**
+   * Flies the orbit target to `target` and the camera to `position` (spec 023, AC-4): a smooth zoom-and-pan
+   * (`fly.ts`, ≤ 2 s of Space time, advanced by `update()`), the direction turning along a great circle, instant
+   * under reduced motion. Counts as an interaction. Cancelled by any visitor input, `reset()`, `reframe()`,
+   * `turnTo()` or another `flyTo()`, leaving the camera where the last frame put it. `follow()` during a flight
+   * shifts it, so it lands on a moving point. `minDistance` works as in `focusOn()`; `instant` lands at once
+   * (e.g. re-framing after a scale switch).
+   */
+  flyTo(
+    target: readonly [number, number, number],
+    position: readonly [number, number, number],
+    options?: { minDistance?: number; instant?: boolean },
+  ): void;
+  /** True while a `flyTo()` is in progress. */
+  readonly flying: boolean;
   dispose(): void;
 }

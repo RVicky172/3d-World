@@ -48,6 +48,21 @@ export interface SpaceContext {
   savedState?: unknown;
 }
 
+/**
+ * The Space's own part of the core's info panel (spec 023, plan §8). The core mounts the panel after the
+ * factory, then hands this to `SpaceInstance.attachInfo`.
+ */
+export interface InfoSlot {
+  /** An empty element inside the panel's region, after the description. Removed with the panel. */
+  readonly content: HTMLElement;
+  /** Hides or shows the Space's description (e.g. while the content stands in for it). */
+  showDescription(show: boolean): void;
+  /** Expands the panel without recording it as the visitor's choice (the remembered preference is untouched). */
+  open(): void;
+  /** Hears every change of the panel's open state: the visitor's toggles and `open()`. */
+  onOpenChange(listener: (open: boolean) => void): void;
+}
+
 /** A live, mounted Space. */
 export interface SpaceInstance {
   scene: Scene;
@@ -65,6 +80,10 @@ export interface SpaceInstance {
    * lost (spec 004, AC-13). `previousSpaceId` is the registry Space just left, if any.
    */
   focusTarget?(context: { previousSpaceId: string | null }): HTMLElement | null;
+  /** Receives the info panel's slot once the core has mounted the panel (spec 023). */
+  attachInfo?(slot: InfoSlot): void;
+  /** The selected body, whether the camera is flying to it and whether the view follows it (test seam, 023). */
+  selection?(): { id: string | null; flying: boolean; following: boolean };
   /** World positions of the Space's hotspots, in data order (test seam, spec 012 AC-6). */
   hotspotPositions?(): Array<{ id: string; world: [number, number, number] }>;
   /** Bodies' world positions and drawn radii, in scene units (test seam, spec 020). */

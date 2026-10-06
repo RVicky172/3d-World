@@ -78,4 +78,56 @@ describe('createInfoPanel', () => {
     expect(overlay.querySelector('.info')).toBeNull();
     expect(overlay.querySelector('canvas-ui')).not.toBeNull();
   });
+
+  describe('slot for the Space’s own content (spec 023, plan §8)', () => {
+    const description = () => region().querySelector<HTMLElement>('p')!;
+
+    it('gives an empty element inside the region, after the description', () => {
+      const { slot } = createInfoPanel(overlay, INFO, { open: true });
+      expect(slot.content.childElementCount).toBe(0);
+      expect(region().contains(slot.content)).toBe(true);
+      expect(
+        description().compareDocumentPosition(slot.content) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it('showDescription hides and shows only the description', () => {
+      const { slot } = createInfoPanel(overlay, INFO, { open: true });
+      slot.content.append(document.createElement('ul'));
+      slot.showDescription(false);
+      expect(description().hidden).toBe(true);
+      expect(region().querySelector('h2')!.hidden).toBe(false);
+      expect(slot.content.hidden).toBe(false);
+      slot.showDescription(true);
+      expect(description().hidden).toBe(false);
+    });
+
+    it('open() expands a collapsed panel without reporting it as the visitor’s choice', () => {
+      const onToggle = vi.fn();
+      const { slot } = createInfoPanel(overlay, INFO, { open: false, onToggle });
+      slot.open();
+      expect(toggle().getAttribute('aria-expanded')).toBe('true');
+      expect(region().hidden).toBe(false);
+      expect(toggle().textContent).toBe('Hide info');
+      expect(onToggle).not.toHaveBeenCalled();
+    });
+
+    it('onOpenChange hears toggle clicks and open(), but not an open() that changes nothing', () => {
+      const { slot } = createInfoPanel(overlay, INFO, { open: false });
+      const changes: boolean[] = [];
+      slot.onOpenChange((open) => changes.push(open));
+      slot.open();
+      slot.open();
+      toggle().click();
+      toggle().click();
+      expect(changes).toEqual([true, false, true]);
+    });
+
+    it('dispose() removes the slot’s content with the panel', () => {
+      const panel = createInfoPanel(overlay, INFO, { open: true });
+      panel.slot.content.append(document.createElement('ul'));
+      panel.dispose();
+      expect(overlay.querySelector('ul')).toBeNull();
+    });
+  });
 });

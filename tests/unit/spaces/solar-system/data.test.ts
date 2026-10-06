@@ -129,6 +129,7 @@ describe('sources (AC-4)', () => {
   it('names a source with URL, licence and date read for each kind of data', () => {
     const covered = new Set(SOURCES.flatMap((s) => s.covers));
     expect([...covered].sort()).toEqual([
+      'facts',
       'imagery',
       'moon-orbits',
       'physical',

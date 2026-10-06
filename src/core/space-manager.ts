@@ -2,7 +2,7 @@ import type { WebGLRenderer } from 'three';
 import { findSpace, spaces } from '../spaces/registry';
 import { clearMessage, showMessage, type MessageKind } from '../ui/messages';
 import { clampProgress } from './progress';
-import type { OpenResult, SpaceFactory, SpaceInstance, SpaceMeta } from './types';
+import type { InfoSlot, OpenResult, SpaceFactory, SpaceInstance, SpaceMeta } from './types';
 
 /** The parts of `Engine` the manager needs. */
 export interface ManagedEngine {
@@ -55,7 +55,10 @@ export interface SpaceManagerOptions {
    * Builds the info panel shown in every registry Space (spec 012, AC-1): called with the Space's registry
    * title and description once its factory has built the view, and disposed with the view. Not for the gallery.
    */
-  infoPanel?: (overlay: HTMLElement, info: { title: string; description: string }) => { dispose(): void };
+  infoPanel?: (
+    overlay: HTMLElement,
+    info: { title: string; description: string },
+  ) => { dispose(): void; slot?: InfoSlot };
   /** Read at each open for `SpaceContext.startTime` (spec 021). Defaults to `Date.now`; tests pass a constant. */
   wallClock?: () => number;
 }
@@ -285,6 +288,7 @@ export class SpaceManager {
       meta && this.infoPanel
         ? this.infoPanel(this.engine.overlay, { title: meta.title, description: meta.description })
         : null;
+    if (panel?.slot) instance.attachInfo?.(panel.slot); // the Space's part of the panel (spec 023)
     this.mounted = { view, id, label, instance, controller, panel };
     this.engine.setInstance(instance);
     if (this.hasMounted) restoreLostFocus(instance, previousSpaceId);

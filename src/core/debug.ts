@@ -1,6 +1,16 @@
 import { PerspectiveCamera } from 'three';
 import type { OpenResult, RendererLike, SpaceInstance } from './types';
 
+/** A camera's view offset, as `PerspectiveCamera.setViewOffset` takes it (spec 023). */
+export interface ViewOffset {
+  fullWidth: number;
+  fullHeight: number;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+}
+
 /** Test/dev-only handle on the running app, used by Playwright (`window.__WORLD__`). */
 export interface WorldDebugApi {
   open(id: string): Promise<OpenResult>;
@@ -14,8 +24,18 @@ export interface WorldDebugApi {
   cameraAspect(): number | null;
   /** Snapshot of the active camera (spec 004): position xyz and quaternion xyzw. */
   cameraPose(): { position: number[]; quaternion: number[] } | null;
-  /** The active perspective camera's projection (spec 012): with the pose, enough to project points in tests. */
-  cameraProjection(): { fov: number; aspect: number; near: number; far: number } | null;
+  /**
+   * The active perspective camera's projection (spec 012): with the pose, enough to project points in tests.
+   * `view` is its view offset while one is set (spec 023: the Solar System centres a selected body in the area
+   * the info panel leaves clear), else null.
+   */
+  cameraProjection(): {
+    fov: number;
+    aspect: number;
+    near: number;
+    far: number;
+    view: ViewOffset | null;
+  } | null;
   /** The active Space's hotspot world positions in data order, or [] (spec 012, AC-6). */
   hotspots(): Array<{ id: string; world: [number, number, number] }>;
   /** The active Space's bodies (world position, drawn radius), or [] (spec 020). */
@@ -25,6 +45,8 @@ export interface WorldDebugApi {
     radius: number;
     quaternion?: [number, number, number, number];
   }>;
+  /** The active Space's selection, or null if it has none (spec 023). */
+  selection(): { id: string | null; flying: boolean; following: boolean } | null;
   /** The active Space's simulated time, or null (spec 021): days since J2000, speed in days/s. */
   simTime(): { days: number; speed: number; playing: boolean } | null;
   /** Jumps the active Space to a simulated date, if it has one (spec 021). */
@@ -87,12 +109,22 @@ export function installDebugHook(
     restoreContext: () => engine.renderer.forceContextRestore(),
     cameraProjection: () => {
       const camera = engine.instance?.camera;
-      return camera instanceof PerspectiveCamera
-        ? { fov: camera.fov, aspect: camera.aspect, near: camera.near, far: camera.far }
+      if (!(camera instanceof PerspectiveCamera)) return null;
+      const view = camera.view?.enabled
+        ? {
+            fullWidth: camera.view.fullWidth,
+            fullHeight: camera.view.fullHeight,
+            offsetX: camera.view.offsetX,
+            offsetY: camera.view.offsetY,
+            width: camera.view.width,
+            height: camera.view.height,
+          }
         : null;
+      return { fov: camera.fov, aspect: camera.aspect, near: camera.near, far: camera.far, view };
     },
     hotspots: () => engine.instance?.hotspotPositions?.() ?? [],
     bodies: () => engine.instance?.bodies?.() ?? [],
+    selection: () => engine.instance?.selection?.() ?? null,
     simTime: () => engine.instance?.simTime?.() ?? null,
     setSimTime: (days) => engine.instance?.setSimTime?.(days),
     cameraAspect: () => {

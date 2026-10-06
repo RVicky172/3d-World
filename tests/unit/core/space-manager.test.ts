@@ -45,7 +45,7 @@ interface TestInstance extends SpaceInstance {
   signalAbortedAtDispose?: boolean;
 }
 
-function createSpace(id: string) {
+function createSpace(id: string, options: { attachInfo?: boolean } = {}) {
   const instances: TestInstance[] = [];
   const factory: SpaceFactory = async (ctx) => {
     log.push(`create(${id})`);
@@ -61,6 +61,7 @@ function createSpace(id: string) {
         log.push(`dispose(${id})`);
       }),
     };
+    if (options.attachInfo) instance.attachInfo = vi.fn(() => log.push(`attachInfo(${id})`));
     instances.push(instance);
     return instance;
   };
@@ -918,7 +919,13 @@ describe('SpaceManager', () => {
           expect(overlay).toBe(engine.overlay);
           const id = engine.instance === null ? '?' : 'mounted';
           log.push(`panel(${info.title})`);
-          const panel = { id, info, dispose: vi.fn(() => log.push(`panel.dispose(${info.title})`)) };
+          const slot = {
+            content: document.createElement('div'),
+            showDescription: vi.fn(),
+            open: vi.fn(),
+            onOpenChange: vi.fn(),
+          };
+          const panel = { id, info, slot, dispose: vi.fn(() => log.push(`panel.dispose(${info.title})`)) };
           panels.push(panel);
           return panel;
         },
@@ -932,6 +939,68 @@ describe('SpaceManager', () => {
       // After the factory, so the panel's prepend puts it before the Space's own overlay DOM.
       expect(log.indexOf('create(a)')).toBeLessThan(log.indexOf('panel(Space A)'));
       expect(log.indexOf('panel(Space A)')).toBeLessThan(log.indexOf('fader.in'));
+    });
+
+    it('hands the panel’s slot to a Space that takes one, right after mounting it (spec 023, plan §8)', async () => {
+      const d = createSpace('d', { attachInfo: true });
+      const manager = new SpaceManager({
+        engine,
+        fader,
+        registry: [d.meta],
+        reducedMotion: () => false,
+        statusElement: status,
+        infoPanel: (_overlay, info) => {
+          log.push(`panel(${info.title})`);
+          const slot = {
+            content: document.createElement('div'),
+            showDescription: vi.fn(),
+            open: vi.fn(),
+            onOpenChange: vi.fn(),
+          };
+          panels.push({ id: 'd', info, slot, dispose: vi.fn() } as never);
+          return { slot, dispose: vi.fn() };
+        },
+      });
+      await manager.open('d');
+      const instance = d.instances.at(-1)!;
+      expect(instance.attachInfo).toHaveBeenCalledTimes(1);
+      expect(instance.attachInfo).toHaveBeenCalledWith((panels[0] as unknown as { slot: unknown }).slot);
+      expect(log.indexOf('panel(d)')).toBeLessThan(log.indexOf('attachInfo(d)'));
+      expect(log.indexOf('attachInfo(d)')).toBeLessThan(log.indexOf('fader.in'));
+    });
+
+    it('opens a Space without attachInfo as before', async () => {
+      await expect(withPanel.open('a')).resolves.toBe('opened');
+      expect(panels).toHaveLength(1);
+    });
+
+    it('never hands a slot to a superseded open', async () => {
+      const d = createSpace('d', { attachInfo: true });
+      const gate = deferred<{ default: SpaceFactory }>();
+      const real = await d.meta.load();
+      d.load.mockReturnValueOnce(gate.promise);
+      const manager = new SpaceManager({
+        engine,
+        fader,
+        registry: [d.meta, b.meta],
+        reducedMotion: () => false,
+        statusElement: status,
+        infoPanel: () => ({
+          slot: {
+            content: document.createElement('div'),
+            showDescription: vi.fn(),
+            open: vi.fn(),
+            onOpenChange: vi.fn(),
+          },
+          dispose: vi.fn(),
+        }),
+      });
+      const stale = manager.open('d');
+      const fresh = manager.open('b');
+      gate.resolve(real);
+      await expect(stale).resolves.toBe('superseded');
+      await fresh;
+      for (const instance of d.instances) expect(instance.attachInfo).not.toHaveBeenCalled();
     });
 
     it('gives the gallery view none', async () => {

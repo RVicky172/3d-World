@@ -157,6 +157,11 @@ describe('createSolarSystem', () => {
     camera().updateMatrixWorld();
     return toScreen(new Vector3(...body(id).world), camera(), W, H);
   };
+  /** The orbit target, read through the camera: what it looks at, at its current distance from the Sun. */
+  const controlsTarget = () => {
+    const forward = new Vector3(0, 0, -1).applyQuaternion(camera().quaternion);
+    return camera().position.clone().add(forward);
+  };
   const looksAt = (id: string) => {
     const forward = new Vector3(0, 0, -1).applyQuaternion(camera().quaternion);
     const toBody = new Vector3(...body(id).world).sub(camera().position).normalize();
@@ -173,11 +178,11 @@ describe('createSolarSystem', () => {
   };
 
   describe('scale on open (AC-7)', () => {
-    it('opens in stylised scale by default, without markers', async () => {
+    it('opens in stylised scale by default, with name labels (spec 023, AC-14)', async () => {
       await open();
       expect(toggle().getAttribute('aria-pressed')).toBe('false');
       expect(body('earth').radius).toBeCloseTo(radiusIn('stylised', 'earth'), 12);
-      expect(markersLayer().hidden).toBe(true);
+      expect(markersLayer().hidden).toBe(false);
     });
 
     it('opens in the remembered scale', async () => {
@@ -212,7 +217,7 @@ describe('createSolarSystem', () => {
       toggle().click();
       expect(JSON.parse(storage.getItem(SCALE_PREFERENCE)!)).toBe('stylised');
       expect(camera().position.length()).toBeCloseTo(homeDistance('stylised'), 3);
-      expect(markersLayer().hidden).toBe(true);
+      expect(markersLayer().hidden).toBe(false); // labels at both scales (spec 023, AC-14)
     });
 
     it('re-frames even after the visitor moved the camera', async () => {
@@ -523,7 +528,7 @@ describe('createSolarSystem', () => {
       expect(visibleLines().every((n) => n.endsWith('-path-stylised'))).toBe(true);
       toggle().click();
       expect(visibleLines()).toHaveLength(15);
-      expect(visibleLines().every((n) => n.endsWith('-path-real'))).toBe(true);
+      expect(visibleLines().every((n) => /-path-real(-far)?$/.test(n))).toBe(true);
     });
 
     it('markers follow the moving bodies in the same frame, even with the camera still (AC-10)', async () => {
@@ -559,6 +564,466 @@ describe('createSolarSystem', () => {
       const reported = new Quaternion().fromArray(b.quaternion!);
       expect(reported.angleTo(space.scene.getObjectByName(b.id)!.quaternion), b.id).toBeLessThan(1e-6);
     }
+  });
+
+  // Spec 023, T050: selecting a body, flying to it, following it, and closing (AC-1–AC-3, AC-5, AC-6, AC-12,
+  // AC-15).
+  describe('selection (spec 023)', () => {
+    let slot: {
+      content: HTMLElement;
+      showDescription: ReturnType<typeof vi.fn<(show: boolean) => void>>;
+      open: ReturnType<typeof vi.fn<() => void>>;
+      onOpenChange: ReturnType<typeof vi.fn<(listener: (open: boolean) => void) => void>>;
+    };
+    const attach = () => {
+      slot = {
+        content: document.createElement('div'),
+        showDescription: vi.fn<(show: boolean) => void>(),
+        open: vi.fn<() => void>(),
+        onOpenChange: vi.fn<(listener: (open: boolean) => void) => void>(),
+      };
+      ctx.overlay.prepend(slot.content); // where the core's panel would put it
+      space.attachInfo!(slot);
+    };
+    const playing = () => {
+      ctx = createFakeContext({ reducedMotion: false });
+      document.body.replaceChildren(ctx.canvas, ctx.overlay);
+      ctx.canvas.setPointerCapture = vi.fn();
+      ctx.canvas.releasePointerCapture = vi.fn();
+    };
+    const run = (seconds: number, step = 1 / 60) => {
+      for (let t = 0; t < seconds - 1e-9; t += step) space.update(step, t);
+    };
+    /** A mouse press and release, moved `drag` px between them. */
+    const click = (x: number, y: number, drag = 0, pointerType = 'mouse') => {
+      const fire = (type: string, px: number, py: number, id = 1) => {
+        const event = new MouseEvent(type, {
+          clientX: px,
+          clientY: py,
+          button: 0,
+          bubbles: true,
+          cancelable: true,
+        });
+        Object.defineProperties(event, { pointerId: { value: id }, pointerType: { value: pointerType } });
+        ctx.canvas.dispatchEvent(event);
+      };
+      fire('pointerdown', x, y);
+      if (drag) fire('pointermove', x + drag, y);
+      fire('pointerup', x + drag, y);
+    };
+    const selection = () => space.selection!();
+    const listButton = (name: string) =>
+      [...slot.content.querySelectorAll<HTMLButtonElement>('.body-list button')].find(
+        (b) => b.textContent === name,
+      )!;
+    const card = () => slot.content.querySelector<HTMLElement>('.body-card')!;
+    const escape = (target: EventTarget = ctx.canvas) =>
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    const landed = () => {
+      for (let i = 0; i < 300 && selection().flying; i++) space.update(1 / 60, i / 60);
+    };
+    const distanceTo = (id: string) => camera().position.distanceTo(new Vector3(...body(id).world));
+
+    it('starts with nothing selected; the panel’s slot holds the body list', async () => {
+      await open();
+      attach();
+      expect(selection()).toEqual({ id: null, flying: false, following: false });
+      expect(slot.content.querySelectorAll('.body-list button')).toHaveLength(16);
+      expect(card().hidden).toBe(true);
+    });
+
+    it('a click on a body selects it (AC-1): card, label, description hidden, panel opened', async () => {
+      await open();
+      attach();
+      const mars = screenOf('mars');
+      click(mars.x, mars.y);
+      expect(selection().id).toBe('mars');
+      expect(card().hidden).toBe(false);
+      expect(card().querySelector('h3')!.textContent).toBe('Mars');
+      expect(slot.showDescription).toHaveBeenLastCalledWith(false);
+      expect(slot.open).toHaveBeenCalled();
+      expect(listButton('Mars').getAttribute('aria-pressed')).toBe('true');
+      space.update(0, 0); // labels redraw on the next frame
+      expect(
+        ctx.overlay.querySelector('.body-marker[data-body="mars"]')!.classList.contains('is-selected'),
+      ).toBe(true);
+    });
+
+    it('a drag of more than 5 px, a right-button press or a two-finger touch selects nothing', async () => {
+      await open();
+      attach();
+      const mars = screenOf('mars');
+      click(mars.x, mars.y, 6);
+      expect(selection().id).toBeNull();
+      const right = new MouseEvent('pointerdown', {
+        clientX: mars.x,
+        clientY: mars.y,
+        button: 2,
+        bubbles: true,
+      });
+      Object.defineProperties(right, { pointerId: { value: 3 }, pointerType: { value: 'mouse' } });
+      ctx.canvas.dispatchEvent(right);
+      const up = new MouseEvent('pointerup', { clientX: mars.x, clientY: mars.y, button: 2, bubbles: true });
+      Object.defineProperties(up, { pointerId: { value: 3 }, pointerType: { value: 'mouse' } });
+      ctx.canvas.dispatchEvent(up);
+      expect(selection().id).toBeNull();
+      pointer('pointerdown', 1, mars.x, mars.y);
+      pointer('pointerdown', 2, mars.x + 80, mars.y);
+      pointer('pointerup', 2, mars.x + 80, mars.y);
+      pointer('pointerup', 1, mars.x, mars.y);
+      expect(selection().id).toBeNull();
+    });
+
+    it('a touch tap selects; clicking empty space keeps the selection', async () => {
+      await open();
+      attach();
+      const jupiter = screenOf('jupiter');
+      click(jupiter.x, jupiter.y, 0, 'touch');
+      expect(selection().id).toBe('jupiter');
+      click(3, 3);
+      expect(selection().id).toBe('jupiter');
+    });
+
+    it('a list button selects its body like a click (AC-2)', async () => {
+      await open();
+      attach();
+      listButton('Saturn').click();
+      expect(selection().id).toBe('saturn');
+    });
+
+    it('flies to the body and frames it, from its sunlit side, then follows it (AC-4, AC-5)', async () => {
+      playing();
+      await open();
+      attach();
+      listButton('Mars').click();
+      expect(selection().flying).toBe(true);
+      expect(selection().following).toBe(true);
+      landed();
+      expect(selection().flying).toBe(false);
+      expect(looksAt('mars')).toBeLessThan(1e-4);
+      // A third of the shorter side: the disc's diameter on screen.
+      const px = (2 * body('mars').radius * (H / 2)) / (distanceTo('mars') * Math.tan(FOV_Y / 2));
+      expect(px / Math.min(W, H)).toBeCloseTo(1 / 3, 1);
+      // Sunlit side: the camera is less than 60° from the Sun as seen from Mars.
+      const toCamera = camera()
+        .position.clone()
+        .sub(new Vector3(...body('mars').world));
+      const toSun = new Vector3(...body('sun').world).sub(new Vector3(...body('mars').world));
+      expect((toCamera.angleTo(toSun) * 180) / Math.PI).toBeLessThan(60);
+      // Time runs (a month per second would be faster; the default week is enough): still centred.
+      run(2);
+      expect(looksAt('mars')).toBeLessThan(1e-4);
+      expect(selection().following).toBe(true);
+    });
+
+    it('holds the turntable while selected, releases it on close', async () => {
+      playing();
+      await open();
+      attach();
+      listButton('Earth').click();
+      landed();
+      run(6); // past the 4 s idle delay
+      const before = camera()
+        .position.clone()
+        .sub(new Vector3(...body('earth').world));
+      run(1);
+      const after = camera()
+        .position.clone()
+        .sub(new Vector3(...body('earth').world));
+      expect(after.angleTo(before)).toBeLessThan(1e-6); // no turntable orbit round Earth
+      escape();
+      run(6);
+      const later = camera().position.clone().sub(controlsTarget());
+      expect(later.angleTo(after)).toBeGreaterThan(1e-3); // the turntable is back
+    });
+
+    it('real scale: the whole-system view draws planets’ far line copies, a close-up of Earth its fine line (D-040)', async () => {
+      await open('real');
+      attach();
+      const drawn = (name: string) => space.scene.getObjectByName(name)!.visible;
+      for (const id of ['mercury', 'earth', 'neptune']) {
+        expect(drawn(`${id}-path-real`), id).toBe(false);
+        expect(drawn(`${id}-path-real-far`), id).toBe(true);
+      }
+      listButton('Earth').click();
+      landed();
+      space.update(1 / 60, 1 / 60);
+      expect(drawn('earth-path-real')).toBe(true);
+      expect(drawn('earth-path-real-far')).toBe(false);
+      expect(drawn('neptune-path-real-far')).toBe(true);
+      escape();
+      toggle().click(); // stylised: no real line of either kind
+      space.update(1 / 60, 2 / 60);
+      expect(drawn('earth-path-real') || drawn('earth-path-real-far')).toBe(false);
+    });
+
+    it('Escape and Close clear it, show the description and leave the camera where it is (AC-12)', async () => {
+      playing();
+      await open();
+      attach();
+      listButton('Earth').click();
+      landed();
+      const where = camera().position.clone();
+      escape();
+      expect(selection()).toEqual({ id: null, flying: false, following: false });
+      expect(card().hidden).toBe(true);
+      expect(slot.showDescription).toHaveBeenLastCalledWith(true);
+      expect(camera().position.distanceTo(where)).toBeLessThan(1e-9);
+      expect(document.activeElement).toBe(listButton('Earth')); // back to the control that selected it
+
+      const saturn = screenOf('saturn');
+      click(saturn.x, saturn.y);
+      card().querySelector<HTMLButtonElement>('button')!.click(); // Close
+      expect(selection().id).toBeNull();
+      expect(document.activeElement).toBe(ctx.canvas); // a canvas click: back to the 3D view
+    });
+
+    it('Escape while the "?" help is open only closes the help', async () => {
+      await open();
+      attach();
+      listButton('Earth').click();
+      const help = ctx.overlay.querySelector<HTMLButtonElement>('button.controls-help-toggle')!;
+      help.click();
+      escape(help);
+      expect(help.getAttribute('aria-expanded')).toBe('false');
+      expect(selection().id).toBe('earth');
+    });
+
+    it('"Reset view" clears the selection and goes home', async () => {
+      await open();
+      attach();
+      listButton('Earth').click();
+      ctx.overlay.querySelector<HTMLButtonElement>('button.controls-reset')!.click();
+      expect(selection().id).toBeNull();
+      expect(looksAt('sun')).toBeLessThan(1e-6);
+    });
+
+    it('a pan ends following but keeps the selection (AC-5)', async () => {
+      playing();
+      await open();
+      attach();
+      listButton('Earth').click();
+      landed();
+      ctx.canvas.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'ArrowLeft', shiftKey: true, bubbles: true }),
+      );
+      space.update(1 / 60, 0);
+      run(0.5);
+      expect(selection()).toMatchObject({ id: 'earth', following: false });
+    });
+
+    it('a real-scale re-centre on another body moves the follow, keeps the selection (D-036)', async () => {
+      await open('real');
+      attach();
+      listButton('Mars').click();
+      landed();
+      // Back out to the whole system, then zoom on Jupiter.
+      for (let i = 0; i < 3; i++) space.update(1 / 60, 0);
+      ctx.overlay.querySelector<HTMLButtonElement>('button.scale-toggle')!.click();
+      ctx.overlay.querySelector<HTMLButtonElement>('button.scale-toggle')!.click(); // real again: home view
+      space.update(1 / 60, 0);
+      const jupiter = screenOf('jupiter');
+      wheelAt(jupiter.x, jupiter.y);
+      space.update(1 / 60, 0);
+      expect(looksAt('jupiter')).toBeLessThan(1e-6);
+      expect(selection().id).toBe('mars');
+    });
+
+    it('any input during the flight cancels it without a jump (AC-6)', async () => {
+      playing();
+      await open();
+      attach();
+      listButton('Neptune').click();
+      run(0.3);
+      expect(selection().flying).toBe(true);
+      ctx.canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+      expect(selection().flying).toBe(false);
+      expect(selection().id).toBe('neptune');
+
+      listButton('Mars').click();
+      run(0.3);
+      expect(selection().flying).toBe(true);
+      click(20, H - 20, 40); // a drag-orbit from empty space
+      expect(selection().flying).toBe(false);
+      expect(selection().id).toBe('mars');
+    });
+
+    it('never touches the clock: speed and play state unchanged by select, fly and close (AC-15)', async () => {
+      playing();
+      await open();
+      attach();
+      const before = space.simTime!();
+      listButton('Jupiter').click();
+      landed();
+      escape();
+      const after = space.simTime!();
+      expect(after.speed).toBe(before.speed);
+      expect(after.playing).toBe(before.playing);
+      expect(after.days).toBeGreaterThan(before.days); // and it kept running
+    });
+
+    describe('clear area, scale switch, live facts, saved state (T052)', () => {
+      /** The panel's region as the core builds it, with a bottom sheet's rectangle at 320 × 640. */
+      const sheet = (top = 287) => {
+        const region = document.createElement('section');
+        region.className = 'info-panel';
+        region.append(slot.content);
+        ctx.overlay.prepend(region);
+        region.getBoundingClientRect = () =>
+          ({
+            left: 16,
+            top,
+            width: 288,
+            height: 225,
+            right: 304,
+            bottom: top + 225,
+            x: 16,
+            y: top,
+          }) as DOMRect;
+        return region;
+      };
+      const phone = () => space.resize(320, 640);
+      const at = (id: string) => {
+        camera().updateMatrixWorld();
+        return toScreen(new Vector3(...body(id).world), camera(), 320, 640);
+      };
+
+      it('centres the selected body in the area above a bottom sheet, framed to a third of it (AC-11)', async () => {
+        playing();
+        await open();
+        attach();
+        sheet();
+        phone();
+        listButton('Earth').click();
+        landed();
+        run(0.7); // the offset has eased in
+        expect(camera().view?.enabled).toBe(true);
+        const earth = at('earth');
+        expect(earth.x).toBeCloseTo(160, 0);
+        expect(earth.y).toBeCloseTo(287 / 2, 0);
+        const px = (2 * body('earth').radius * 320) / (distanceTo('earth') * Math.tan(FOV_Y / 2));
+        expect(px / 287).toBeCloseTo(1 / 3, 1);
+      });
+
+      it('eases the offset out over 0.3 s on close; instant under reduced motion', async () => {
+        playing();
+        await open();
+        attach();
+        sheet();
+        phone();
+        listButton('Earth').click();
+        landed();
+        run(0.7);
+        escape();
+        run(0.1);
+        expect(camera().view?.enabled).toBe(true); // still easing
+        run(0.3);
+        expect(camera().view?.enabled ?? false).toBe(false);
+
+        space.dispose();
+        ctx = createFakeContext({ reducedMotion: true });
+        document.body.replaceChildren(ctx.canvas, ctx.overlay);
+        ctx.canvas.setPointerCapture = vi.fn();
+        ctx.canvas.releasePointerCapture = vi.fn();
+        await open();
+        attach();
+        sheet();
+        phone();
+        listButton('Earth').click();
+        space.update(0, 0);
+        expect(at('earth').y).toBeCloseTo(287 / 2, 0);
+        escape();
+        space.update(0, 0);
+        expect(camera().view?.enabled ?? false).toBe(false);
+      });
+
+      it('recomputes the clear area on resize and when the panel opens or closes', async () => {
+        await open();
+        attach();
+        const region = sheet();
+        phone();
+        listButton('Earth').click();
+        space.update(0, 0);
+        expect(at('earth').y).toBeCloseTo(287 / 2, 0);
+        region.getBoundingClientRect = () => ({ left: 0, top: 0, width: 0, height: 0 }) as DOMRect; // collapsed
+        slot.onOpenChange.mock.calls.forEach(([listener]) => listener(false));
+        space.update(0, 0);
+        expect(camera().view?.enabled ?? false).toBe(false);
+        space.resize(800, 600);
+        space.update(0, 0);
+        expect(camera().view?.enabled ?? false).toBe(false);
+      });
+
+      it('a scale switch keeps the selection and frames the body at the new scale, still following (AC-8)', async () => {
+        playing();
+        await open();
+        attach();
+        listButton('Saturn').click();
+        landed();
+        toggle().click(); // real scale
+        expect(selection()).toEqual({ id: 'saturn', flying: false, following: true });
+        space.update(1 / 60, 0);
+        expect(looksAt('saturn')).toBeLessThan(1e-4);
+        const px = (2 * body('saturn').radius * (H / 2)) / (distanceTo('saturn') * Math.tan(FOV_Y / 2));
+        expect(px / Math.min(W, H)).toBeCloseTo(1 / 3, 1);
+        run(1);
+        expect(looksAt('saturn')).toBeLessThan(1e-4);
+      });
+
+      it('shows the live distance and updates it as time runs (AC-10)', async () => {
+        playing();
+        await open();
+        attach();
+        listButton('Earth').click();
+        const live = () => card().querySelector<HTMLElement>('.body-card-live')!;
+        expect(live().hidden).toBe(false);
+        expect(live().textContent).toMatch(/^Now: [\d.]+ million km from the Sun$/);
+        const first = live().textContent;
+        run(4); // four weeks
+        expect(live().textContent).not.toBe(first);
+        escape();
+        listButton('Sun').click();
+        expect(live().hidden).toBe(true); // the Sun has none
+      });
+
+      it('saveState() carries the selection across a context loss; the rebuild selects and follows it (AC-16)', async () => {
+        await open();
+        attach();
+        listButton('Mars').click();
+        landed();
+        const saved = space.saveState!();
+        space.dispose();
+        ctx = createFakeContext({ reducedMotion: true, savedState: saved });
+        document.body.replaceChildren(ctx.canvas, ctx.overlay);
+        ctx.canvas.setPointerCapture = vi.fn();
+        ctx.canvas.releasePointerCapture = vi.fn();
+        await open();
+        attach();
+        expect(selection()).toEqual({ id: 'mars', flying: false, following: true });
+        expect(card().querySelector('h3')!.textContent).toBe('Mars');
+        expect(slot.showDescription).toHaveBeenLastCalledWith(false);
+        expect(looksAt('mars')).toBeLessThan(1e-4);
+      });
+
+      it('a new visit, or a saved selection it doesn’t know, starts with nothing selected', async () => {
+        ctx = createFakeContext({ reducedMotion: true, savedState: { time: undefined, selected: 'pluto' } });
+        document.body.replaceChildren(ctx.canvas, ctx.overlay);
+        ctx.canvas.setPointerCapture = vi.fn();
+        ctx.canvas.releasePointerCapture = vi.fn();
+        await open();
+        attach();
+        expect(selection().id).toBeNull();
+      });
+    });
+
+    it('dispose() removes the list and card and stops listening for clicks', async () => {
+      await open();
+      attach();
+      const mars = screenOf('mars');
+      space.dispose();
+      expect(slot.content.childElementCount).toBe(0);
+      expect(() => click(mars.x, mars.y)).not.toThrow();
+    });
   });
 
   it('dispose() frees the scene, the toggle, the markers and the 3D view’s description (AC-12)', async () => {

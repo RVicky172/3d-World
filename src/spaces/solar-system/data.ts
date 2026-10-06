@@ -1,4 +1,4 @@
-import type { BodyData, DataSource, Imagery } from './types';
+import type { BodyData, BodyFacts, DataSource, Imagery } from './types';
 
 /**
  * The Sun, the eight planets and the seven moons with a radius ≥ 1 000 km (spec 020, D-022), as data
@@ -122,6 +122,20 @@ export const SOURCES: readonly DataSource[] = [
     licence: 'CC BY 4.0',
     read: '2026-10-06',
     covers: ['imagery'],
+  },
+  {
+    name: 'JPL Solar System Dynamics, Planetary Satellite Discovery Circumstances (known moons per planet; Earth’s one is the Moon)',
+    url: 'https://ssd.jpl.nasa.gov/sats/discovery.html',
+    licence: 'Public domain (NASA/JPL, US government work)',
+    read: '2026-10-06',
+    covers: ['facts'],
+  },
+  {
+    name: 'NASA Science, Solar System body pages (the facts behind each description, in our own words)',
+    url: 'https://science.nasa.gov/solar-system/',
+    licence: 'Public domain (NASA, US government work)',
+    read: '2026-10-06',
+    covers: ['facts'],
   },
   {
     name: 'PDS Ring-Moon Systems Node, Vital Statistics for Saturn’s Rings (C ring inner edge, A ring outer edge)',
@@ -532,3 +546,85 @@ export const BODIES: readonly BodyData[] = [
     imagery: map('triton.ktx2', 67067),
   },
 ];
+
+/** When the moon counts were read (JPL's discovery table, D-036). */
+const MOONS_AS_OF = '2026-10-06';
+const moons = (count: number) => ({ count, asOf: MOONS_AS_OF });
+
+/**
+ * Each body's facts card text (spec 023, AC-9, AC-13; copy approved in T002): our own plain wording of NASA
+ * Science's body pages, and the planets' known moons from JPL. Numbers the card shows otherwise come from `BODIES`.
+ */
+export const FACTS: Readonly<Record<string, BodyFacts>> = {
+  sun: {
+    description:
+      "A star: a vast ball of hot hydrogen and helium whose light and heat power the whole Solar System. It holds about 99.8 % of the Solar System's mass.",
+  },
+  mercury: {
+    description:
+      'The smallest planet and the closest to the Sun. With almost no atmosphere to hold in heat, its surface swings from scorching days to freezing nights.',
+    knownMoons: moons(0),
+  },
+  venus: {
+    description:
+      'Close to Earth in size, but wrapped in clouds of sulphuric acid above a crushing carbon-dioxide atmosphere. The trapped heat makes it the hottest planet, hotter even than Mercury.',
+    knownMoons: moons(0),
+  },
+  earth: {
+    description: 'Our home, and the only place known to have life. Liquid water covers most of its surface.',
+    knownMoons: moons(1),
+  },
+  mars: {
+    description:
+      "A cold desert world, red from rusty iron in its dust. It has the Solar System's largest volcano, Olympus Mons, and signs that water once flowed on its surface.",
+    knownMoons: moons(2),
+  },
+  jupiter: {
+    description:
+      'The largest planet, a gas giant more than twice as massive as all the other planets combined. Its Great Red Spot is a storm bigger than Earth that has raged for centuries.',
+    knownMoons: moons(115),
+  },
+  saturn: {
+    description:
+      'A gas giant famous for its bright rings of ice and rock. It is the least dense planet: on average, less dense than water.',
+    knownMoons: moons(293),
+  },
+  uranus: {
+    description:
+      'An ice giant that spins on its side, so each pole spends decades in sunlight and then decades in darkness. Methane in its atmosphere gives it a blue-green colour.',
+    knownMoons: moons(29),
+  },
+  neptune: {
+    description:
+      'The farthest planet from the Sun: a cold, dark ice giant with the fastest winds in the Solar System.',
+    knownMoons: moons(16),
+  },
+  moon: {
+    description:
+      "Earth's only natural satellite, and the only other world people have walked on. It always keeps the same face towards Earth.",
+  },
+  io: {
+    description:
+      'The most volcanically active world in the Solar System. Tides from Jupiter knead its interior, powering hundreds of volcanoes.',
+  },
+  europa: {
+    description:
+      'An icy moon hiding a global ocean of salty water beneath its frozen shell: one of the most promising places to look for life beyond Earth.',
+  },
+  ganymede: {
+    description:
+      'The largest moon in the Solar System, bigger than the planet Mercury. It is the only moon known to have its own magnetic field.',
+  },
+  callisto: {
+    description:
+      'One of the most heavily cratered worlds in the Solar System. Its dark, ancient surface has barely changed in billions of years.',
+  },
+  titan: {
+    description:
+      "Saturn's largest moon, and the only moon with a thick atmosphere. Methane and ethane rain fill rivers, lakes and seas on its surface.",
+  },
+  triton: {
+    description:
+      "Neptune's largest moon, and the only large moon that orbits backwards, against its planet's spin. Probably a captured world from the Kuiper Belt, it has geysers erupting through its ice.",
+  },
+};

@@ -115,7 +115,20 @@ export interface DataSource {
   licence: string;
   /** ISO date the values were read. */
   read: string;
-  covers: Array<'physical' | 'planet-orbits' | 'moon-orbits' | 'rotation' | 'imagery' | 'rings' | 'stars'>;
+  covers: Array<
+    'physical' | 'planet-orbits' | 'moon-orbits' | 'rotation' | 'imagery' | 'rings' | 'stars' | 'facts'
+  >;
+}
+
+/**
+ * What a body's facts card adds to its `BodyData` (spec 023, AC-13): text and moon counts only. Every number the
+ * card shows besides the moon count is derived from `BodyData` (`facts.ts`), so nothing is stored twice.
+ */
+export interface BodyFacts {
+  /** One or two plain sentences. */
+  description: string;
+  /** Planets only: moons known on `asOf` (an ISO date). */
+  knownMoons?: { count: number; asOf: string };
 }
 
 /** Per body, in scene units: distance from its parent's centre, and display radius. */

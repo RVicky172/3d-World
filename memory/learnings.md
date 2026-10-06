@@ -69,8 +69,24 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - **A USGS mosaic's layout is in its GeoTIFF header**, readable from the first few MB with `curl -L -r` (a plain range request without `-L` gets a redirect stub; Python's default user agent gets 403). Central meridian = the second GeoKey double; the tie-point gives the left edge. "Positive west" in USGS metadata only labels longitudes: the pixels still run east to the right; only the centre (0° or 180°) differs. The 1024 px sample JPGs share the source's layout.
 - **Mosaics mark unmapped areas pure black**, which renders as holes on a sphere; fill them before encoding (022 T004).
 
+## Real-scale accuracy (023)
+
+- **Judge a line's error in the body's radii, not the orbit's size.** 021's orbit lines were checked to < 0.2 % of
+  each orbit's size, which looked fine at whole-system views; in a close-up the same error is 1–14 of the body's own
+  radii (Neptune's line 0.33 units off, its radius 0.025), so the line visibly crossed the body. Both 256-point
+  chord sag and element drift between fixed-interval rebuilds mattered, drift more. Measure with a throwaway test
+  before picking a fix (T053, D-038).
+
 ## Testing
 
+- **A CDP input and a separate pose read race a running animation.** `page.mouse.wheel()` lands an unknown number of
+  frames after a preceding `page.evaluate` pose read, so a "no jump on cancel" check counted the flight's own
+  progress and flaked under full-suite load (023 AC-6). Read the pose and `dispatchEvent` the input in one
+  `evaluate`. When sabotaging "cancel on interact", disable both OrbitControls `start` and `end` listeners: a wheel
+  fires both.
+- **SwiftShader pays per line segment.** 8 real-scale planet orbit lines at 4 096 points (~32 k segments) cost
+  ~10 fps at the whole-system view (48 → 38) vs 256 points; the per-frame CPU stray check was negligible. Measure
+  a baseline commit in a `git worktree` with the same script in the same session: absolute fps drifts between days.
 - **Multi-touch in E2E:** `touchGesture()` in `tests/e2e/fixtures.ts` sends CDP `Input.dispatchTouchEvent`. Chromium turns it into pointer events, which OrbitControls handles (one-finger orbit, pinch, two-finger pan). It needs a context with `hasTouch: true` (and `isMobile` for coarse-pointer wording).
 - **Playwright `click()` on an element the turntable is moving stalls for seconds:** its actionability check waits for the box to stay put across two animation frames. A hotspot click took 9.3 s. Use `click({ force: true })` (still a real mouse click at the current centre) for moving targets, with reduced motion wherever the test allows it (012).
 - **DOM-count leak checks must skip the lazy `.loading-announcer`** (011, D-019). It's created on the first load slow enough to show the indicator and kept for the app's lifetime, so under 4-worker load a round-trip count went 31 → 32 once. Count `#app *:not(.loading-announcer)` (012 AC-15).
@@ -78,6 +94,9 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 - **A moving CDP pinch also pans.** Chromium sends each finger's `touchMove` as its own pointer event, so the two-finger midpoint wobbles and OrbitControls' DOLLY_PAN pans. With a fast `zoomSpeed` that drifted the target ~6° off the pinched body. To test something that happens on touch-down, use `touchGesture(page, fingers, 0)`: start and end, no moves (020 T031).
 - **"Re-frames after X" tests must move the camera first.** Controls' `setHome()` already re-frames a camera the visitor hasn't touched, so a scale switch looked framed even with the explicit `reset()` removed. Zoom and orbit before switching, or the test can't fail (020 T030).
 - **An optimisation keyed on the camera breaks once the scene moves on its own.** 020's markers skip re-projecting while the camera's matrices are unchanged; with 021's moving bodies they lagged up to 12 px whenever the camera stood still (e.g. the 4 s turntable pause after any interaction). The unit test passed because the turntable kept the camera moving. Anything that moves bodies must call `markers.invalidate()`; test motion with a still camera (021 T041).
+- **"Sunward half is brighter" doesn't prove a sunlit view.** A sphere's half towards the Sun is brighter from any
+  viewing angle, so that check passed with the camera on the night side (023 T061 sabotage). Test what the spec
+  says: the camera–Sun angle seen from the body, and that the disc's middle (facing the camera) is lit.
 - **Make sure a motion test moves further than its tolerance.** A "markers follow this frame's camera" test ran the turntable 0.5 s. At real scale the slow turntable moved Jupiter ~0.5 px, inside `toBeCloseTo(…, 0)`, so swapping the update order still passed. With 10 s (~11 px) the sabotage fails (020 T025).
 - **A "paused" test must outlast the idle delay.** `turnTo` counts as interaction and restarts the turntable's 4 s idle delay, so checking stillness for 600 ms after opening an annotation passed even with `holdTurntable` removed. Check beyond the idle delay (012 AC-12).
 - `page.mouse.wheel()` scrolls wherever the mouse **currently** is. After a drag that ended over the canvas, a wheel meant for a button zooms the camera. Hover the target first.
@@ -121,10 +140,17 @@ Non-obvious facts discovered while building. Keep entries short; group by topic.
 
 - **Screenshot every new overlay at 320 px wide.** Independently positioned overlay pieces (credit bottom-left, controls bottom-right, the 012 bottom sheet) collide on phones: the model credit squeezed beside the controls wrapped to four lines and covered the sheet. Absolute siblings can't see each other's size; `.overlay:has(.model-credit) .info` (CSS `:has`) adjusts one piece when another is present.
 
+- **A grid container's `max-height` doesn't shrink `auto` rows:** content spills past it. The info panel (`.info`,
+  a grid) kept its region inside `max-height` only on phones, which set `grid-template-rows: auto minmax(0, 1fr)`;
+  on wide screens 023's facts card + body list grew over "Reset view" (Playwright: "<li> … intercepts pointer
+  events"). The rows rule is now on the base `.info` (T060).
 - **Overlay layers vs focus visibility (012):** markers drawn over the info sheet cluttered its text, but putting them under it hid a Tab-focused marker (WCAG 2.4.11). Children of a `z-index`-less absolute layer join the overlay's stacking context, so `.hotspot:focus-visible { z-index: 2 }` lifts just the focused one above `.info { z-index: 1 }`. Check with `document.elementFromPoint` at the focused element's centre.
 - A popover clamped into a 320 px viewport can land on top of its own anchor when it fits on neither side; fall back to below/above the anchor.
 
 - Removing the focused element (e.g. the gallery card the visitor activated) drops focus to `<body>`, but Chrome keeps the sequential-focus starting point where the removed node was. The next Tab then continues from there, not from the top. SpaceManager now restores lost focus via `SpaceInstance.focusTarget()` (004 AC-13). A same-document `page.goto('#…')` does not reset that starting point either, so it is not a "fresh load" in tests.
+- **A clicked button isn't always focused:** Safari (macOS) doesn't focus a `<button>` on mouse click, and jsdom's
+  `.click()` focuses nothing. So `document.activeElement` in a click handler can't tell you which control was used;
+  pass the control (or its id) explicitly. 023's body list returns focus to the selected body's own button (T051).
 - `element.checkVisibility()` detects focus stranded on a `display: none` element, such as the back link on the gallery. jsdom lacks it, so guard with `typeof … === 'function'`.
 - TypeScript 6 DOM types declare `HTMLElement.hidden` as `boolean | "until-found"`, so `setOpen(panel.hidden)` fails to typecheck. Keep disclosure state in `aria-expanded` and read it from there.
 - Stacking since 003: canvas → `.overlay` (z 1, view DOM) → `.fader` (z 2) → `.back-to-gallery` (z 4). The fader hides the whole view while switching. Chrome that must stay steady goes above it, and `data-view` is set at the _start_ of an open so chrome never flashes.
